@@ -1,0 +1,20 @@
+<navigation-bar title="编辑菜品" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="page">
+    <view class="card">
+      <view class="title">名称</view>
+      <input class="input" placeholder="例如：番茄鸡蛋" value="{{name}}" bindinput="onName" />
+    </view>
+    <view class="card">
+      <view class="title">价格（元）</view>
+      <input class="input" placeholder="例如：12.50" type="digit" value="{{priceYuan}}" bindinput="onPrice" />
+      <view class="muted small">系统内部按“分”存储</view>
+    </view>
+    <view class="card">
+      <view class="title">上架</view>
+      <switch checked="{{isActive}}" bindchange="onActive" />
+    </view>
+    <button class="btn" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存</button>
+  </view>
+</scroll-view>
+

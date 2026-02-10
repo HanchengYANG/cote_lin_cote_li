@@ -1,0 +1,49 @@
+<!--index.wxml-->
+<navigation-bar title="菜单" back="{{false}}" color="black" background="#FFF"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list" refresher-enabled="{{true}}" refresher-triggered="{{refresherTriggered}}" bindrefresherrefresh="onPullDownRefresh">
+  <view class="page">
+    <view class="admin-row" wx:if="{{isAdmin}}">
+      <button class="btn ghost" size="mini" bindtap="goAdminHome">店主端</button>
+    </view>
+
+    <view class="card" wx:if="{{!sale}}">
+      <view class="muted">未开单 / 暂不接单</view>
+      <view class="muted small">请稍后再试</view>
+      <view class="spacer"></view>
+      <button class="btn ghost" size="mini" bindtap="goMyOrders">我的订单</button>
+      <view wx:if="{{isAdmin}}" class="spacer"></view>
+      <button wx:if="{{isAdmin}}" class="btn" bindtap="goAdminSaleDraft">去开单</button>
+    </view>
+
+    <view wx:else class="card">
+      <view class="row">
+        <view class="title">本次开单</view>
+        <button class="btn ghost" size="mini" bindtap="goMyOrders">我的订单</button>
+      </view>
+      <view class="muted small" wx:if="{{sale.note}}">{{sale.note}}</view>
+      <view class="muted small">配送时间段：{{sale.deliveryTimeSlotLabel}}</view>
+    </view>
+
+    <view wx:if="{{sale}}" class="list">
+      <view class="dish" wx:for="{{dishes}}" wx:key="_id">
+        <view class="dish-main">
+          <view class="dish-name">{{item.name}}</view>
+          <view class="dish-price">￥{{item.priceYuan}}</view>
+        </view>
+        <view class="dish-ops">
+          <button class="qty-btn" size="mini" bindtap="dec" data-id="{{item._id}}">-</button>
+          <text class="qty">{{item.qty}}</text>
+          <button class="qty-btn" size="mini" bindtap="inc" data-id="{{item._id}}">+</button>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{sale}}" class="bottom-bar">
+      <view class="bottom-left">
+        <view class="muted small">已选 {{totalQty}} 件</view>
+        <view class="sum">合计 ￥{{totalAmountYuan}}</view>
+      </view>
+      <button class="btn" disabled="{{totalQty===0}}" bindtap="goCheckout">去结算</button>
+    </view>
+  </view>
+</scroll-view>

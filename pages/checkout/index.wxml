@@ -1,0 +1,84 @@
+<navigation-bar title="结算" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="page">
+    <view class="card" wx:if="{{!sale}}">
+      <view class="muted">当前没有开单</view>
+      <view class="muted small">请返回菜单页刷新</view>
+    </view>
+
+    <view wx:else>
+      <view class="card">
+        <view class="title">购物明细</view>
+        <view class="line" wx:for="{{lines}}" wx:key="dishId">
+          <view class="line-left">
+            <view class="name">{{item.name}}</view>
+            <view class="muted small">￥{{item.unitPriceYuan}} x {{item.qty}}</view>
+          </view>
+          <view class="line-right">￥{{item.lineTotalYuan}}</view>
+        </view>
+        <view class="hr"></view>
+        <view class="row">
+          <view class="muted">总计</view>
+          <view class="sum">￥{{totalAmountYuan}}</view>
+        </view>
+      </view>
+
+      <view class="card">
+        <view class="title">履约方式</view>
+        <radio-group bindchange="onFulfillmentChange">
+          <label class="radio">
+            <radio value="delivery" checked="{{fulfillmentType==='delivery'}}" />
+            <text>配送</text>
+          </label>
+          <label class="radio">
+            <radio value="pickup" checked="{{fulfillmentType==='pickup'}}" />
+            <text>自取</text>
+          </label>
+        </radio-group>
+      </view>
+
+      <view class="card">
+        <view class="title">联系方式</view>
+        <input class="input" placeholder="电话（必填）" type="number" value="{{phone}}" bindinput="onPhoneInput" />
+      </view>
+
+      <view class="card" wx:if="{{fulfillmentType==='delivery'}}">
+        <view class="title">配送地址</view>
+        <input class="input" placeholder="省" value="{{address.province}}" bindinput="onAddr" data-k="province" />
+        <input class="input" placeholder="市" value="{{address.city}}" bindinput="onAddr" data-k="city" />
+        <input class="input" placeholder="区/县" value="{{address.district}}" bindinput="onAddr" data-k="district" />
+        <input class="input" placeholder="详细地址（街道/门牌等）" value="{{address.detail}}" bindinput="onAddr" data-k="detail" />
+        <input class="input" placeholder="补充信息（可选）" value="{{address.extra}}" bindinput="onAddr" data-k="extra" />
+      </view>
+
+      <view class="card" wx:if="{{fulfillmentType==='delivery'}}">
+        <view class="title">配送时间段</view>
+        <view class="slot">{{sale.deliveryTimeSlotLabel}}</view>
+        <checkbox-group bindchange="onAcceptChange">
+          <label class="checkbox">
+            <checkbox value="accept" checked="{{acceptDeliverySlot}}" />
+            <text>我接受该时间段</text>
+          </label>
+        </checkbox-group>
+      </view>
+
+      <view class="card">
+        <view class="title">付款</view>
+        <picker mode="selector" range="{{paymentMethodLabels}}" range-key="label" value="{{paymentMethodIndex}}" bindchange="onPaymentMethodPick">
+          <view class="picker">付款方式：{{paymentMethodLabel}}</view>
+        </picker>
+        <picker mode="selector" range="{{paidStatusLabels}}" range-key="label" value="{{paidStatusIndex}}" bindchange="onPaidStatusPick">
+          <view class="picker">收款状态：{{paidStatusLabel}}</view>
+        </picker>
+      </view>
+
+      <view class="card">
+        <view class="title">备注</view>
+        <textarea class="textarea" placeholder="可选" value="{{remark}}" bindinput="onRemarkInput"></textarea>
+      </view>
+
+      <button class="btn" loading="{{submitting}}" disabled="{{submitDisabled}}" bindtap="submit">提交订单</button>
+      <view class="muted small center" wx:if="{{submitDisabled && submitDisabledReason}}">{{submitDisabledReason}}</view>
+    </view>
+  </view>
+</scroll-view>

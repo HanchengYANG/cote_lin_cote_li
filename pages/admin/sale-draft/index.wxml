@@ -1,0 +1,36 @@
+<navigation-bar title="开单草稿" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="page">
+    <view class="card" wx:if="{{!sale}}">
+      <view class="muted small">加载中...</view>
+    </view>
+
+    <view wx:else>
+      <view class="card">
+        <view class="title">配送时间段（必填，仅一个）</view>
+        <input class="input" placeholder="例如：2026年2月10日 15:00-18:00" value="{{sale.deliveryTimeSlotLabel}}" bindinput="onSlotLabel" />
+      </view>
+
+      <view class="card">
+        <view class="title">说明文案（可选）</view>
+        <textarea class="textarea" placeholder="展示在菜单页顶部" value="{{sale.note}}" bindinput="onNote"></textarea>
+      </view>
+
+      <view class="card">
+        <view class="title">本次售卖菜品</view>
+        <view class="muted small" wx:if="{{dishes.length===0}}">请先到菜品库新增菜品</view>
+        <checkbox-group bindchange="onDishSelect">
+          <label class="check" wx:for="{{dishes}}" wx:key="_id">
+            <checkbox value="{{item._id}}" checked="{{item.selected}}" />
+            <text>{{item.name}} ￥{{item.priceYuan}}</text>
+            <text class="muted small" wx:if="{{!item.isActive}}">（已下架）</text>
+          </label>
+        </checkbox-group>
+      </view>
+
+      <button class="btn" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存草稿</button>
+      <button class="btn ghost" loading="{{opening}}" disabled="{{opening}}" bindtap="openSale">开单</button>
+    </view>
+  </view>
+</scroll-view>
+

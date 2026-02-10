@@ -1,0 +1,21 @@
+<navigation-bar title="菜品库" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="page">
+    <view class="row">
+      <button class="btn" bindtap="add">新增菜品</button>
+    </view>
+
+    <view class="list">
+      <view class="item" wx:for="{{dishes}}" wx:key="_id">
+        <view class="left" bindtap="edit" data-id="{{item._id}}">
+          <view class="name">{{item.name}}</view>
+          <view class="muted small">￥{{item.priceYuan}}</view>
+        </view>
+        <view class="right">
+          <switch checked="{{item.isActive}}" bindchange="toggle" data-id="{{item._id}}" />
+        </view>
+      </view>
+    </view>
+  </view>
+</scroll-view>
+

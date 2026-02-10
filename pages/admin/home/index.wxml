@@ -1,0 +1,56 @@
+<navigation-bar title="店主端" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="page">
+    <block wx:if="{{!isAdmin}}">
+      <view class="card">
+        <view class="muted">无权限</view>
+        <view class="muted small">请把你的 openid 加入云数据库 `adminConfig/main.adminOpenIds`</view>
+        <view class="muted small">我的 openid：{{myOpenId}}</view>
+        <button class="btn ghost" size="mini" bindtap="copyOpenId">复制 openid</button>
+      </view>
+    </block>
+
+    <block wx:else>
+      <view class="card">
+        <view class="title">当前开单</view>
+        <view wx:if="{{activeSale}}">
+          <view class="muted small">状态：{{activeSale.status}}</view>
+          <view class="muted small">配送时间段：{{activeSale.deliveryTimeSlotLabel}}</view>
+          <view class="muted small">订单数：{{stats.orderCount}}</view>
+          <view class="row">
+            <button class="btn ghost" size="mini" bindtap="goOrders">订单</button>
+            <button class="btn danger" size="mini" bindtap="closeSale">截单</button>
+          </view>
+        </view>
+        <view wx:else>
+          <view class="muted">暂无开单中</view>
+          <button class="btn" bindtap="goSaleDraft">创建/编辑开单</button>
+        </view>
+      </view>
+
+      <view class="card">
+        <view class="title">快捷功能</view>
+        <view class="grid">
+          <button class="btn ghost" bindtap="goDishes">菜品库</button>
+          <button class="btn ghost" bindtap="goSaleDraft">开单草稿</button>
+          <button class="btn ghost" bindtap="goOrders">订单管理</button>
+          <button class="btn ghost" bindtap="goExport">导出</button>
+        </view>
+      </view>
+
+      <view class="card">
+        <view class="title">历史开单</view>
+        <view class="muted small" wx:if="{{sales.length===0}}">暂无</view>
+        <view class="sale" wx:for="{{sales}}" wx:key="_id">
+          <view class="sale-left">
+            <view class="strong">{{item.status}}</view>
+            <view class="muted small">{{item.createdAtText}}</view>
+          </view>
+          <view class="sale-right">
+            <button class="btn ghost" size="mini" bindtap="goExportWithSale" data-id="{{item._id}}">导出</button>
+          </view>
+        </view>
+      </view>
+    </block>
+  </view>
+</scroll-view>

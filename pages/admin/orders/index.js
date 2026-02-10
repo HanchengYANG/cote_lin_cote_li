@@ -1,0 +1,110 @@
+const { call } = require('../../../utils/api')
+const { formatTime, fenToYuan } = require('../../../utils/format')
+
+const TYPE_OPTIONS = [
+  { label: '全部', value: 'all' },
+  { label: '配送', value: 'delivery' },
+  { label: '自取', value: 'pickup' },
+]
+
+function decorateOrder(o) {
+  const statusText = o.status === 'CANCELLED' ? '已取消' : '有效'
+  const statusClass = o.status === 'CANCELLED' ? 'cancel' : 'ok'
+  const fulfillmentText = o.fulfillmentType === 'pickup' ? '自取' : '配送'
+  const totals = o.totals || { amountFen: 0, qty: 0 }
+  return {
+    ...o,
+    statusText,
+    statusClass,
+    fulfillmentText,
+    createdAtText: formatTime(o.createdAt),
+    totals: { qty: totals.qty || 0, amountYuan: fenToYuan(totals.amountFen || 0) },
+  }
+}
+
+Page({
+  data: {
+    loading: false,
+    saleOptions: [{ label: '加载中...', value: '' }],
+    saleIndex: 0,
+    saleLabel: '加载中...',
+    typeOptions: TYPE_OPTIONS,
+    typeIndex: 0,
+    typeLabel: TYPE_OPTIONS[0].label,
+    orders: [],
+  },
+
+  onShow() {
+    this.init()
+  },
+
+  async init() {
+    const dashRes = await call('admin', 'getDashboard')
+    const salesRes = await call('admin', 'listSales', { limit: 20 })
+    let sales = []
+    if (salesRes.ok) sales = salesRes.data.sales || []
+
+    const opts = sales.map((s) => ({
+      label: `${s.status} ${formatTime(s.createdAt)}`,
+      value: s._id,
+    }))
+    if (opts.length === 0) opts.push({ label: '暂无开单', value: '' })
+
+    let saleIndex = 0
+    if (dashRes.ok && dashRes.data.activeSale) {
+      const activeId = dashRes.data.activeSale._id
+      const idx = opts.findIndex((o) => o.value === activeId)
+      saleIndex = idx >= 0 ? idx : 0
+    }
+    this.setData({ saleOptions: opts, saleIndex })
+    this.recomputeLabels()
+    this.reload()
+  },
+
+  onPickSale(e) {
+    this.setData({ saleIndex: Number(e.detail.value || 0) })
+    this.recomputeLabels()
+  },
+
+  onPickType(e) {
+    this.setData({ typeIndex: Number(e.detail.value || 0) })
+    this.recomputeLabels()
+  },
+
+  recomputeLabels() {
+    const saleLabel =
+      (this.data.saleOptions[this.data.saleIndex] && this.data.saleOptions[this.data.saleIndex].label) || '未选择'
+    const typeLabel =
+      (this.data.typeOptions[this.data.typeIndex] && this.data.typeOptions[this.data.typeIndex].label) || '未选择'
+    this.setData({ saleLabel, typeLabel })
+  },
+
+  async reload() {
+    const saleId = this.data.saleOptions[this.data.saleIndex] && this.data.saleOptions[this.data.saleIndex].value
+    if (!saleId) {
+      this.setData({ orders: [] })
+      return
+    }
+    const type = this.data.typeOptions[this.data.typeIndex].value
+    this.setData({ loading: true })
+    const res = await call('admin', 'listOrders', { saleId, fulfillmentType: type })
+    this.setData({ loading: false })
+    if (!res.ok) {
+      wx.showToast({ title: res.message || '加载失败', icon: 'none' })
+      return
+    }
+    const raw = res.data.orders || []
+    raw.sort((a, b) => {
+      const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0
+      const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0
+      return tb - ta
+    })
+    const orders = raw.map(decorateOrder)
+    this.setData({ orders })
+  },
+
+  goDetail(e) {
+    const id = e.currentTarget.dataset.id
+    wx.navigateTo({ url: `/pages/admin/order-detail/index?orderId=${encodeURIComponent(id)}` })
+  },
+})

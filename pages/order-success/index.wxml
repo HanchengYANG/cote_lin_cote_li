@@ -1,0 +1,15 @@
+<navigation-bar title="下单成功" back="{{false}}" color="black" background="#FFF"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="page">
+    <view class="card">
+      <view class="big">订单已提交</view>
+      <view class="muted small">订单号</view>
+      <view class="orderid">{{orderId}}</view>
+      <view class="muted small" wx:if="{{tip}}">{{tip}}</view>
+    </view>
+
+    <button class="btn" bindtap="goOrders">查看我的订单</button>
+    <button class="btn ghost" bindtap="goMenu">返回菜单</button>
+  </view>
+</scroll-view>
+

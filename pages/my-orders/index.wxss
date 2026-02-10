@@ -1,0 +1,61 @@
+page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f6f7fb;
+}
+.scrollarea {
+  flex: 1;
+  overflow-y: hidden;
+}
+.page {
+  padding: 24rpx;
+}
+.card {
+  background: #fff;
+  border-radius: 20rpx;
+  padding: 22rpx;
+  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.06);
+  margin-bottom: 18rpx;
+}
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+.item {
+  background: #fff;
+  border-radius: 20rpx;
+  padding: 22rpx;
+  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.06);
+}
+.item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10rpx;
+}
+.tag {
+  font-size: 24rpx;
+  padding: 6rpx 14rpx;
+  border-radius: 999rpx;
+  background: rgba(0, 0, 0, 0.06);
+}
+.tag.ok {
+  background: rgba(0, 0, 0, 0.08);
+}
+.tag.cancel {
+  background: rgba(255, 0, 0, 0.10);
+  color: #b00020;
+}
+.muted {
+  color: rgba(0, 0, 0, 0.55);
+}
+.small {
+  font-size: 24rpx;
+}
+.strong {
+  font-weight: 700;
+  font-size: 30rpx;
+}
+

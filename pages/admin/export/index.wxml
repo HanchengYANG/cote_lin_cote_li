@@ -1,0 +1,25 @@
+<navigation-bar title="导出" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="page">
+    <view class="card">
+      <view class="title">选择开单</view>
+      <picker mode="selector" range="{{saleOptions}}" range-key="label" value="{{saleIndex}}" bindchange="onPickSale">
+        <view class="picker">开单：{{saleLabel}}</view>
+      </picker>
+    </view>
+
+    <view class="card">
+      <view class="title">导出类型</view>
+      <picker mode="selector" range="{{typeOptions}}" range-key="label" value="{{typeIndex}}" bindchange="onPickType">
+        <view class="picker">类型：{{typeLabel}}</view>
+      </picker>
+      <label class="check">
+        <checkbox checked="{{includeCancelled}}" bindchange="onIncludeCancelled" />
+        <text>包含已取消订单</text>
+      </label>
+    </view>
+
+    <button class="btn" loading="{{exporting}}" disabled="{{exporting || !canExport}}" bindtap="doExport">生成并打开文件</button>
+    <view class="muted small center">导出会生成可直接打开的 .xls 文件</view>
+  </view>
+</scroll-view>

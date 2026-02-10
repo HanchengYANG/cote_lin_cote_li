@@ -1,0 +1,48 @@
+page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f6f7fb;
+}
+.scrollarea {
+  flex: 1;
+  overflow-y: hidden;
+}
+.page {
+  padding: 24rpx;
+}
+.card {
+  background: #fff;
+  border-radius: 20rpx;
+  padding: 22rpx;
+  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.06);
+  margin-bottom: 18rpx;
+}
+.title {
+  font-size: 32rpx;
+  font-weight: 700;
+  margin-bottom: 14rpx;
+}
+.input {
+  border: 1rpx solid rgba(0, 0, 0, 0.12);
+  border-radius: 14rpx;
+  padding: 18rpx 16rpx;
+}
+.muted {
+  color: rgba(0, 0, 0, 0.55);
+}
+.small {
+  font-size: 24rpx;
+  margin-top: 10rpx;
+}
+.btn {
+  background: #111;
+  color: #fff;
+  border-radius: 18rpx;
+  height: 88rpx;
+  line-height: 88rpx;
+}
+.btn[disabled] {
+  opacity: 0.4;
+}
+
