@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {
+    "markdown-it": "^14.1.0",
     "wx-server-sdk": "^2.6.3"
   }
 }
-

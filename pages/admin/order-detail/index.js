@@ -1,32 +1,23 @@
 const { call } = require('../../../utils/api')
-const { formatTime, fenToYuan } = require('../../../utils/format')
-
-function formatAddress(addr) {
-  if (!addr) return ''
-  const parts = [addr.province, addr.city, addr.district, addr.detail, addr.extra].filter(Boolean)
-  return parts.join('')
-}
-
-function decorateOrder(o) {
-  const statusText = o.status === 'CANCELLED' ? '已取消' : '有效'
-  const fulfillmentText = o.fulfillmentType === 'pickup' ? '自取' : '配送'
-  const items = (o.items || []).map((it) => ({ ...it, lineTotalYuan: fenToYuan(it.lineTotalFen || 0) }))
-  const totals = o.totals || { amountFen: 0, qty: 0 }
-  return {
-    ...o,
-    statusText,
-    fulfillmentText,
-    createdAtText: formatTime(o.createdAt),
-    addressText: formatAddress(o.address),
-    items,
-    totals: { qty: totals.qty || 0, amountYuan: fenToYuan(totals.amountFen || 0) },
-  }
-}
+const {
+  decorateOrder,
+  buildEditableItems,
+  calcEditableTotals,
+  applyQtyDelta,
+  removeDish,
+  buildPayloadItems,
+} = require('../../../utils/order-editor')
 
 Page({
   data: {
     orderId: '',
     order: null,
+    canEditItems: false,
+    canCancelOrder: false,
+    editableItems: [],
+    editableTotals: { qty: 0, amountEuro: '0.00' },
+    saving: false,
+    cancelling: false,
   },
 
   onLoad(query) {
@@ -41,26 +32,86 @@ Page({
       wx.showToast({ title: res.message || '加载失败', icon: 'none' })
       return
     }
-    const order = res.data && res.data.order
-    this.setData({ order: order ? decorateOrder(order) : null })
-  },
-
-  cancel() {
-    if (!this.data.order || this.data.order.status === 'CANCELLED') return
-    wx.showModal({
-      title: '确认取消订单',
-      content: '取消后默认不计入统计导出。',
-      success: async (r) => {
-        if (!r.confirm) return
-        const res = await call('admin', 'cancelOrder', { orderId: this.data.orderId })
-        if (!res.ok) {
-          wx.showToast({ title: res.message || '取消失败', icon: 'none' })
-          return
-        }
-        wx.showToast({ title: '已取消', icon: 'success' })
-        this.reload()
-      },
+    const rawOrder = res.data && res.data.order
+    const order = rawOrder ? decorateOrder(rawOrder) : null
+    const canEditItems = !!(rawOrder && rawOrder.status === 'ACTIVE')
+    const editableItems = buildEditableItems(rawOrder)
+    this.setData({
+      order,
+      canEditItems,
+      canCancelOrder: canEditItems,
+      editableItems,
+      editableTotals: calcEditableTotals(editableItems),
     })
   },
-})
 
+  onQtyChange(e) {
+    if (!this.data.canEditItems) return
+    const dishId = String((e.detail && e.detail.dishId) || '').trim()
+    const delta = Number(e.detail && e.detail.delta)
+    if (!dishId || !Number.isFinite(delta)) return
+    const editableItems = applyQtyDelta(this.data.editableItems, dishId, delta)
+    this.setData({
+      editableItems,
+      editableTotals: calcEditableTotals(editableItems),
+    })
+  },
+
+  onRemoveItem(e) {
+    if (!this.data.canEditItems) return
+    const dishId = String((e.detail && e.detail.dishId) || '').trim()
+    if (!dishId) return
+    const editableItems = removeDish(this.data.editableItems, dishId)
+    this.setData({
+      editableItems,
+      editableTotals: calcEditableTotals(editableItems),
+    })
+  },
+
+  async onSaveItems() {
+    if (!this.data.canEditItems || this.data.saving) return
+    const payloadItems = buildPayloadItems(this.data.editableItems)
+    const hasAny = payloadItems.some((it) => it.qty > 0)
+    if (!hasAny) {
+      wx.showToast({ title: '订单不能清空，请点取消整单', icon: 'none' })
+      return
+    }
+    this.setData({ saving: true })
+    const res = await call('admin', 'updateOrderItems', {
+      orderId: this.data.orderId,
+      items: payloadItems,
+    })
+    this.setData({ saving: false })
+    if (!res.ok) {
+      wx.showToast({ title: res.message || '保存失败', icon: 'none' })
+      await this.reload()
+      return
+    }
+    wx.showToast({ title: '已保存', icon: 'success' })
+    await this.reload()
+  },
+
+  async onCancelOrder() {
+    if (!this.data.canCancelOrder || this.data.cancelling) return
+    const modalRes = await new Promise((resolve) => {
+      wx.showModal({
+        title: '确认取消订单',
+        content: '取消后默认不计入统计导出。',
+        confirmColor: '#d93025',
+        success: resolve,
+        fail: () => resolve({ confirm: false }),
+      })
+    })
+    if (!modalRes.confirm) return
+    this.setData({ cancelling: true })
+    const res = await call('admin', 'cancelOrder', { orderId: this.data.orderId })
+    this.setData({ cancelling: false })
+    if (!res.ok) {
+      wx.showToast({ title: res.message || '取消失败', icon: 'none' })
+      await this.reload()
+      return
+    }
+    wx.showToast({ title: '已取消', icon: 'success' })
+    await this.reload()
+  },
+})

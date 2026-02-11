@@ -107,6 +107,33 @@ function toSafeInt(v, fallback = 0) {
   return Math.floor(n)
 }
 
+function parseAndValidateDeliverySlot(event) {
+  const deliverySlotDate = event.deliverySlotDate ? String(event.deliverySlotDate).trim() : ''
+  const deliverySlotStartTime = event.deliverySlotStartTime ? String(event.deliverySlotStartTime).trim() : ''
+  const deliverySlotEndTime = event.deliverySlotEndTime ? String(event.deliverySlotEndTime).trim() : ''
+  if (!(deliverySlotDate && deliverySlotStartTime && deliverySlotEndTime)) {
+    return { ok: false, message: 'Missing structured slot fields' }
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(deliverySlotDate)) return { ok: false, message: 'Invalid slot date' }
+  if (!/^\d{2}:\d{2}$/.test(deliverySlotStartTime)) return { ok: false, message: 'Invalid slot start time' }
+  if (!/^\d{2}:\d{2}$/.test(deliverySlotEndTime)) return { ok: false, message: 'Invalid slot end time' }
+  if (deliverySlotStartTime >= deliverySlotEndTime) return { ok: false, message: 'Invalid slot time range' }
+  return {
+    ok: true,
+    deliverySlotDate,
+    deliverySlotStartTime,
+    deliverySlotEndTime,
+    deliveryTimeSlotLabel: `${deliverySlotDate} ${deliverySlotStartTime}-${deliverySlotEndTime}`,
+  }
+}
+
+function throwBiz(code, message, detail) {
+  const err = new Error(message || code || 'BIZ_ERROR')
+  err.code = code || 'BIZ_ERROR'
+  err.detail = detail
+  throw err
+}
+
 function normalizeDishConfigs(input) {
   if (!Array.isArray(input)) return []
   const seen = new Set()
@@ -309,19 +336,11 @@ exports.main = async (event) => {
     }
     if (!sale || sale.status !== 'OPEN') return fail('BAD_REQUEST', 'Sale is not open')
 
-    const deliverySlotDate = event.deliverySlotDate ? String(event.deliverySlotDate).trim() : ''
-    const deliverySlotStartTime = event.deliverySlotStartTime ? String(event.deliverySlotStartTime).trim() : ''
-    const deliverySlotEndTime = event.deliverySlotEndTime ? String(event.deliverySlotEndTime).trim() : ''
+    const slot = parseAndValidateDeliverySlot(event)
     const note = String(event.note || '').trim()
     const incomingConfigs = normalizeDishConfigs(event.dishConfigs)
     if (incomingConfigs.length === 0) return fail('BAD_REQUEST', 'Missing dishConfigs')
-    if (!(deliverySlotDate && deliverySlotStartTime && deliverySlotEndTime)) {
-      return fail('BAD_REQUEST', 'Missing structured slot fields')
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(deliverySlotDate)) return fail('BAD_REQUEST', 'Invalid slot date')
-    if (!/^\d{2}:\d{2}$/.test(deliverySlotStartTime)) return fail('BAD_REQUEST', 'Invalid slot start time')
-    if (!/^\d{2}:\d{2}$/.test(deliverySlotEndTime)) return fail('BAD_REQUEST', 'Invalid slot end time')
-    if (deliverySlotStartTime >= deliverySlotEndTime) return fail('BAD_REQUEST', 'Invalid slot time range')
+    if (!slot.ok) return fail('BAD_REQUEST', slot.message)
 
     const oldConfigs = normalizeDishConfigs(sale.dishConfigs)
     const oldMap = dishConfigMap(oldConfigs)
@@ -352,14 +371,13 @@ exports.main = async (event) => {
       nextConfigs.push({ dishId: cfgItem.dishId, limitQty: cfgItem.limitQty, soldQty })
     }
 
-    const deliveryTimeSlotLabel = `${deliverySlotDate} ${deliverySlotStartTime}-${deliverySlotEndTime}`
     const nextVersion = Math.max(1, toSafeInt(sale.saleConfigVersion, 0) + 1)
     await db.collection('sales').doc(saleId).update({
       data: {
-        deliveryTimeSlotLabel,
-        deliverySlotDate,
-        deliverySlotStartTime,
-        deliverySlotEndTime,
+        deliveryTimeSlotLabel: slot.deliveryTimeSlotLabel,
+        deliverySlotDate: slot.deliverySlotDate,
+        deliverySlotStartTime: slot.deliverySlotStartTime,
+        deliverySlotEndTime: slot.deliverySlotEndTime,
         note,
         dishIds: nextConfigs.map((x) => x.dishId),
         dishConfigs: nextConfigs,
@@ -399,9 +417,7 @@ exports.main = async (event) => {
     if (!saleId) return fail('BAD_REQUEST', 'Missing saleId')
     const sale = await getSale(saleId)
     if (!sale || sale.status !== 'DRAFT') return fail('BAD_REQUEST', 'Sale is not draft')
-    const deliverySlotDate = event.deliverySlotDate ? String(event.deliverySlotDate).trim() : ''
-    const deliverySlotStartTime = event.deliverySlotStartTime ? String(event.deliverySlotStartTime).trim() : ''
-    const deliverySlotEndTime = event.deliverySlotEndTime ? String(event.deliverySlotEndTime).trim() : ''
+    const slot = parseAndValidateDeliverySlot(event)
     const note = String(event.note || '').trim()
     const incomingConfigs = normalizeDishConfigs(event.dishConfigs)
     if (incomingConfigs.length === 0) return fail('BAD_REQUEST', 'Missing dishConfigs')
@@ -410,20 +426,13 @@ exports.main = async (event) => {
     if (dishList.length !== dishIds.length) return fail('BAD_REQUEST', 'Dish not found')
     const activeSet = new Set((dishList || []).filter((d) => d && d.isActive).map((d) => d._id))
     if (activeSet.size !== dishIds.length) return fail('BAD_REQUEST', 'Contains inactive dish')
-    if (!(deliverySlotDate && deliverySlotStartTime && deliverySlotEndTime)) {
-      return fail('BAD_REQUEST', 'Missing structured slot fields')
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(deliverySlotDate)) return fail('BAD_REQUEST', 'Invalid slot date')
-    if (!/^\d{2}:\d{2}$/.test(deliverySlotStartTime)) return fail('BAD_REQUEST', 'Invalid slot start time')
-    if (!/^\d{2}:\d{2}$/.test(deliverySlotEndTime)) return fail('BAD_REQUEST', 'Invalid slot end time')
-    if (deliverySlotStartTime >= deliverySlotEndTime) return fail('BAD_REQUEST', 'Invalid slot time range')
-    const deliveryTimeSlotLabel = `${deliverySlotDate} ${deliverySlotStartTime}-${deliverySlotEndTime}`
+    if (!slot.ok) return fail('BAD_REQUEST', slot.message)
     await db.collection('sales').doc(saleId).update({
       data: {
-        deliveryTimeSlotLabel,
-        deliverySlotDate,
-        deliverySlotStartTime,
-        deliverySlotEndTime,
+        deliveryTimeSlotLabel: slot.deliveryTimeSlotLabel,
+        deliverySlotDate: slot.deliverySlotDate,
+        deliverySlotStartTime: slot.deliverySlotStartTime,
+        deliverySlotEndTime: slot.deliverySlotEndTime,
         note,
         dishIds,
         dishConfigs: incomingConfigs.map((x) => ({ dishId: x.dishId, limitQty: x.limitQty, soldQty: 0 })),
@@ -552,6 +561,135 @@ exports.main = async (event) => {
     } catch (err) {
       return fail('ORDER_NOT_FOUND', 'Order not found')
     }
+  }
+
+  if (action === 'updateOrderItems') {
+    const { orderId } = event
+    const incomingItems = Array.isArray(event.items) ? event.items : []
+    if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
+    let txRes
+    try {
+      txRes = await db.runTransaction(async (tx) => {
+        let order
+        try {
+          const orderGet = await tx.collection('orders').doc(orderId).get()
+          order = orderGet.data
+        } catch (err) {
+          throwBiz('ORDER_NOT_FOUND', 'Order not found')
+        }
+        if (!order) throwBiz('ORDER_NOT_FOUND', 'Order not found')
+        if (order.status !== 'ACTIVE') throwBiz('ORDER_NOT_EDITABLE', 'Order is not editable')
+
+        const oldItems = Array.isArray(order.items) ? order.items : []
+        if (oldItems.length === 0) throwBiz('BAD_REQUEST', 'Order has no editable items')
+
+        const oldMap = new Map()
+        for (const it of oldItems) {
+          const dishId = String((it && it.dishId) || '').trim()
+          if (!dishId) continue
+          oldMap.set(dishId, it)
+        }
+        if (oldMap.size === 0) throwBiz('BAD_REQUEST', 'Order has no editable items')
+
+        const nextQtyMap = new Map()
+        for (const it of incomingItems) {
+          const dishId = String((it && it.dishId) || '').trim()
+          const qty = Number(it && it.qty)
+          if (!dishId || !Number.isFinite(qty) || qty < 0) throwBiz('BAD_REQUEST', 'Invalid items')
+          if (!oldMap.has(dishId)) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
+          nextQtyMap.set(dishId, Math.floor(qty))
+        }
+        for (const dishId of oldMap.keys()) {
+          if (!nextQtyMap.has(dishId)) nextQtyMap.set(dishId, 0)
+        }
+
+        const nextItems = []
+        let totalQty = 0
+        let totalAmountCents = 0
+        for (const [dishId, nextQty] of nextQtyMap.entries()) {
+          if (nextQty <= 0) continue
+          const old = oldMap.get(dishId)
+          const unitPriceCents = toSafeInt(old && old.unitPriceCents, 0)
+          const dishName = String((old && old.dishName) || '')
+          if (!dishName) throwBiz('BAD_REQUEST', 'Invalid order item')
+          const lineTotalCents = unitPriceCents * nextQty
+          totalQty += nextQty
+          totalAmountCents += lineTotalCents
+          nextItems.push({ dishId, dishName, unitPriceCents, qty: nextQty, lineTotalCents })
+        }
+        if (nextItems.length === 0) throwBiz('BAD_REQUEST', 'Order cannot be empty, cancel it instead')
+
+        const expandedLimits = []
+        let saleVersionSnapshot = toSafeInt(order.saleConfigVersionSnapshot, 0)
+        if (order.saleId) {
+          let sale = null
+          try {
+            const saleGet = await tx.collection('sales').doc(order.saleId).get()
+            sale = saleGet.data
+          } catch (err) {
+            sale = null
+          }
+          if (sale && Array.isArray(sale.dishConfigs) && sale.dishConfigs.length > 0) {
+            const cfgMap = dishConfigMap(sale.dishConfigs)
+            for (const [dishId, nextQty] of nextQtyMap.entries()) {
+              const oldQty = toSafeInt(oldMap.get(dishId) && oldMap.get(dishId).qty, 0)
+              const delta = nextQty - oldQty
+              if (delta === 0) continue
+              const cfgItem = cfgMap.get(dishId)
+              if (!cfgItem) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
+              if (delta > 0) {
+                const remain = Math.max(0, toSafeInt(cfgItem.limitQty, 0) - toSafeInt(cfgItem.soldQty, 0))
+                if (delta > remain) {
+                  const grow = delta - remain
+                  cfgItem.limitQty = Math.max(0, toSafeInt(cfgItem.limitQty, 0) + grow)
+                  expandedLimits.push({
+                    dishId,
+                    increaseBy: grow,
+                    newLimitQty: cfgItem.limitQty,
+                  })
+                }
+              }
+              cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) + delta)
+              cfgMap.set(dishId, cfgItem)
+            }
+            const nextConfigs = normalizeDishConfigs(sale.dishConfigs).map((x) => {
+              const cur = cfgMap.get(x.dishId)
+              return cur ? { dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty } : x
+            })
+            await tx.collection('sales').doc(order.saleId).update({
+              data: {
+                dishConfigs: nextConfigs,
+                updatedAt: db.serverDate(),
+              },
+            })
+          }
+          saleVersionSnapshot = toSafeInt(sale && sale.saleConfigVersion, saleVersionSnapshot)
+        }
+
+        const now = db.serverDate()
+        await tx.collection('orders').doc(orderId).update({
+          data: {
+            items: nextItems,
+            totals: { qty: totalQty, amountCents: totalAmountCents },
+            saleConfigVersionSnapshot: saleVersionSnapshot,
+            updatedAt: now,
+          },
+        })
+        await tx.collection('orderAuditLogs').add({
+          data: {
+            orderId,
+            action: 'ADMIN_UPDATE_ITEMS',
+            byOpenId: openId,
+            at: now,
+          },
+        })
+        return { totalQty, totalAmountCents, expandedLimits }
+      })
+    } catch (err) {
+      if (err && err.code) return fail(err.code, err.message || 'Request failed', err.detail)
+      return fail('TX_FAILED', 'Update order failed', String(err && err.message))
+    }
+    return ok(txRes || {})
   }
 
   if (action === 'cancelOrder') {

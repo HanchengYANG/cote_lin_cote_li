@@ -14,9 +14,8 @@
           <view class="strong">{{item.fulfillmentText}}</view>
           <view class="muted small" wx:if="{{item.deliveryTimeSlotLabelSnapshot}}">时间段：{{item.deliveryTimeSlotLabelSnapshot}}</view>
         </view>
-        <view class="muted small">共 {{item.totals.qty}} 件，￥{{item.totals.amountYuan}}</view>
+        <view class="muted small">共 {{item.totals.qty}} 件，€{{item.totals.amountEuro}}</view>
       </view>
     </view>
   </view>
 </scroll-view>
-

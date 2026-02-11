@@ -1,5 +1,5 @@
 const { call } = require('../../../utils/api')
-const { fenToYuan } = require('../../../utils/format')
+const { centToEuro } = require('../../../utils/format')
 
 Page({
   data: {
@@ -18,7 +18,8 @@ Page({
     }
     const dishes = (res.data.dishes || []).map((d) => ({
       ...d,
-      priceYuan: fenToYuan(d.priceFen || 0),
+      priceEuro: centToEuro(d.priceCents || 0),
+      thumb: d.thumbUrl || '',
     }))
     this.setData({ dishes })
   },
@@ -44,4 +45,3 @@ Page({
     wx.showToast({ title: '已更新', icon: 'success' })
   },
 })
-

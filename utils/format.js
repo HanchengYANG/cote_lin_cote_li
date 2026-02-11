@@ -14,13 +14,21 @@ function formatTime(ts) {
   return `${Y}-${M}-${D} ${h}:${m}`
 }
 
-function fenToYuan(fen) {
-  const n = Number(fen || 0)
+function centToEuro(cents) {
+  const n = Number(cents || 0)
   return (n / 100).toFixed(2)
+}
+
+function euroToCent(str) {
+  const s = String(str || '').trim().replace(',', '.')
+  if (!s) return 0
+  const n = Number(s)
+  if (Number.isNaN(n)) return 0
+  return Math.round(n * 100)
 }
 
 module.exports = {
   formatTime,
-  fenToYuan,
+  centToEuro,
+  euroToCent,
 }
-

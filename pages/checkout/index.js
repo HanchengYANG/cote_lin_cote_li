@@ -1,5 +1,6 @@
 const { call } = require('../../utils/api')
 const { centToEuro } = require('../../utils/format')
+const { outOfStockMessage } = require('../../utils/order-errors')
 
 const PAYMENT_METHODS = [
   { label: '现金', value: 'cash' },
@@ -31,25 +32,32 @@ function findPaymentMethodIndex(value) {
   return idx >= 0 ? idx : 0
 }
 
-function outOfStockMessage(detail) {
-  const list = detail && Array.isArray(detail.items) ? detail.items : []
-  if (list.length === 0) return '库存不足，请返回菜单调整'
-  const first = list[0]
-  const name = String((first && first.dishName) || '')
-  const remain = Number(first && first.remainingQty)
-  if (name && Number.isFinite(remain)) return `${name} 库存不足（剩余 ${Math.max(0, remain)}）`
-  if (name) return `${name} 库存不足`
-  return '库存不足，请返回菜单调整'
+function normalizeCartItems(input) {
+  const arr = Array.isArray(input) ? input : []
+  const out = []
+  for (const it of arr) {
+    const dishId = String((it && it.dishId) || '').trim()
+    const qty = Number(it && it.qty)
+    if (!dishId || !Number.isFinite(qty) || qty <= 0) continue
+    out.push({
+      dishId,
+      qty: Math.floor(qty),
+      name: String((it && it.name) || ''),
+      priceCents: Number(it && it.priceCents) || 0,
+    })
+  }
+  return out
 }
 
 Page({
   data: {
+    saleStatus: 'loading', // loading | open | closed
     sale: null,
-    saleId: '',
     cartItems: [],
     lines: [],
     totalAmountEuro: '0.00',
     hasExistingOrder: false,
+    dishesById: {},
 
     fulfillmentType: 'delivery',
     phone: '',
@@ -70,41 +78,64 @@ Page({
 
   async onLoad() {
     const cart = wx.getStorageSync('checkout_cart')
-    if (!cart || !cart.saleId || !Array.isArray(cart.items) || cart.items.length === 0) {
+    const cartItems = normalizeCartItems(cart && cart.items)
+    if (cartItems.length === 0) {
       wx.showToast({ title: '购物车为空', icon: 'none' })
       wx.navigateBack()
       return
     }
-    this.setData({ saleId: cart.saleId, cartItems: cart.items })
+    this.setData({ cartItems })
     await this.reload()
-    this.recalcLines()
-    this.recomputeSubmitDisabled()
+  },
+
+  saveCart() {
+    wx.setStorageSync('checkout_cart', {
+      items: this.data.cartItems,
+      updatedAt: Date.now(),
+    })
   },
 
   async reload() {
+    this.setData({ saleStatus: 'loading' })
     const res = await call('customer', 'getCurrentSale')
+    if (res && !res.ok) {
+      wx.showToast({ title: res.message || '加载开单失败', icon: 'none' })
+    }
+
     if (!res.ok || !res.data || !res.data.sale) {
-      this.setData({ sale: null, lines: [], totalAmountEuro: '0.00' })
+      this.setData({
+        saleStatus: 'closed',
+        sale: null,
+        hasExistingOrder: false,
+        dishesById: {},
+      })
+      this.recalcLines()
       this.recomputeSubmitDisabled()
       return
     }
+
     const sale = res.data.sale
-    if (sale._id !== this.data.saleId) {
-      // Sale changed while user was checking out.
-      wx.showToast({ title: '开单已变化，请重新下单', icon: 'none' })
-      wx.removeStorageSync('checkout_cart')
-      wx.navigateBack()
-      return
-    }
+    const dishes = Array.isArray(res.data.dishes) ? res.data.dishes : []
+    const allowedSet = new Set((sale.dishIds || []).filter(Boolean))
     const dishesById = {}
-    for (const d of res.data.dishes || []) dishesById[d._id] = d
+    for (const d of dishes) dishesById[d._id] = d
+
+    const prevItems = normalizeCartItems(this.data.cartItems)
+    const cartItems = prevItems.filter((it) => allowedSet.has(it.dishId))
+    const removedCount = prevItems.length - cartItems.length
+    if (removedCount > 0) {
+      wx.showToast({ title: `已移除 ${removedCount} 个非本次开单菜品`, icon: 'none' })
+    }
+
     let existingOrder = null
     const orderRes = await call('customer', 'getMySaleOrder', { saleId: sale._id })
     if (orderRes.ok && orderRes.data && orderRes.data.order) existingOrder = orderRes.data.order
 
     const next = {
+      saleStatus: 'open',
       sale,
       dishesById,
+      cartItems,
       hasExistingOrder: !!existingOrder,
     }
     if (existingOrder) {
@@ -127,7 +158,10 @@ Page({
       next.paymentMethodLabel = PAYMENT_METHODS[methodIdx].label
       next.remark = String(existingOrder.remark || '')
     }
+
     this.setData(next)
+    this.saveCart()
+    this.recalcLines()
     this.recomputeSubmitDisabled()
   },
 
@@ -137,15 +171,14 @@ Page({
     let totalCents = 0
     for (const it of this.data.cartItems) {
       const dish = dishesById[it.dishId]
-      if (!dish) continue
       const qty = Number(it.qty || 0)
       if (qty <= 0) continue
-      const unitPriceCents = Number(dish.priceCents || 0)
+      const unitPriceCents = dish ? Number(dish.priceCents || 0) : Number(it.priceCents || 0)
       const lineTotalCents = unitPriceCents * qty
       totalCents += lineTotalCents
       lines.push({
         dishId: it.dishId,
-        name: dish.name,
+        name: dish ? String(dish.name || it.name || '') : String(it.name || ''),
         qty,
         unitPriceCents,
         unitPriceEuro: centToEuro(unitPriceCents),
@@ -162,7 +195,6 @@ Page({
     const v = e.detail.value
     this.setData({
       fulfillmentType: v,
-      // Reset accept flag when leaving delivery mode.
       acceptDeliverySlot: v === 'delivery' ? this.data.acceptDeliverySlot : false,
     })
     this.recomputeSubmitDisabled()
@@ -245,21 +277,31 @@ Page({
   recomputeSubmitDisabled() {
     let disabled = false
     let reason = ''
-    if (this.data.submitting) disabled = true
-    if (!this.data.sale) {
+    if (this.data.submitting) {
       disabled = true
-      reason = '当前没有开单，无法下单'
+      reason = '提交中...'
+    }
+    if (!disabled && (!this.data.cartItems || this.data.cartItems.length === 0)) {
+      disabled = true
+      reason = '当前购物车无可下单菜品'
+    }
+    if (!disabled && this.data.saleStatus === 'loading') {
+      disabled = true
+      reason = '正在刷新开单状态...'
+    }
+    if (!disabled && this.data.saleStatus !== 'open') {
+      disabled = true
+      reason = '当前未开单，暂不可提交订单'
     }
     if (!disabled && !isPhoneValid(this.data.phone)) {
       disabled = true
       reason = '请填写正确的电话（仅数字，可带+号）'
     }
-    if (this.data.fulfillmentType === 'delivery') {
-      if (!disabled && !isAddressValid(this.data.address)) {
+    if (!disabled && this.data.fulfillmentType === 'delivery') {
+      if (!isAddressValid(this.data.address)) {
         disabled = true
         reason = '请填写法国地址（line1 / postal code / city）'
-      }
-      if (!disabled && !this.data.acceptDeliverySlot) {
+      } else if (!this.data.acceptDeliverySlot) {
         disabled = true
         reason = '请勾选“我接受该时间段”'
       }
@@ -268,17 +310,17 @@ Page({
   },
 
   async submit() {
-    if (this.data.submitDisabled) return
+    if (this.data.submitDisabled || this.data.submitting) return
     this.setData({ submitting: true })
     this.recomputeSubmitDisabled()
     const paymentMethod = PAYMENT_METHODS[this.data.paymentMethodIndex].value
     const payload = {
-      saleId: this.data.saleId,
+      saleId: this.data.sale && this.data.sale._id,
       fulfillmentType: this.data.fulfillmentType,
       phone: normalizePhone(this.data.phone),
       address: this.data.fulfillmentType === 'delivery' ? this.data.address : null,
       acceptDeliverySlot: this.data.fulfillmentType === 'delivery' ? !!this.data.acceptDeliverySlot : false,
-      items: this.data.cartItems,
+      items: this.data.cartItems.map((it) => ({ dishId: it.dishId, qty: Number(it.qty || 0) })),
       payment: { method: paymentMethod },
       remark: String(this.data.remark || '').trim(),
     }
@@ -287,9 +329,8 @@ Page({
     this.recomputeSubmitDisabled()
     if (!res.ok) {
       if (res.code === 'OUT_OF_STOCK') {
-        wx.showToast({ title: outOfStockMessage(res.detail), icon: 'none' })
+        wx.showToast({ title: outOfStockMessage(res.detail, '库存不足，请返回菜单调整'), icon: 'none' })
         await this.reload()
-        this.recalcLines()
         return
       }
       wx.showToast({ title: res.message || '下单失败', icon: 'none' })

@@ -23,6 +23,10 @@ page {
   font-weight: 700;
   margin-bottom: 14rpx;
 }
+.warn {
+  border: 1rpx solid rgba(255, 138, 0, 0.35);
+  background: #fffaf2;
+}
 .muted {
   color: rgba(0, 0, 0, 0.55);
 }
@@ -38,6 +42,13 @@ page {
   align-items: center;
   justify-content: space-between;
   padding: 12rpx 0;
+}
+.line-left {
+  flex: 1;
+  min-width: 0;
+}
+.line-right {
+  margin-left: 12rpx;
 }
 .name {
   font-weight: 600;
@@ -67,6 +78,29 @@ page {
   border-radius: 14rpx;
   padding: 18rpx 16rpx;
   margin-top: 12rpx;
+}
+.row2 {
+  display: flex;
+  gap: 12rpx;
+}
+.half {
+  flex: 1;
+}
+.sug {
+  margin-top: 10rpx;
+  border: 1rpx solid rgba(0, 0, 0, 0.10);
+  border-radius: 14rpx;
+  overflow: hidden;
+}
+.sug-item {
+  padding: 14rpx 16rpx;
+  border-top: 1rpx solid rgba(0, 0, 0, 0.06);
+}
+.sug-item:first-child {
+  border-top: none;
+}
+.sug-label {
+  font-size: 26rpx;
 }
 .slot {
   padding: 16rpx;
@@ -102,4 +136,3 @@ page {
 .btn[disabled] {
   opacity: 0.4;
 }
-

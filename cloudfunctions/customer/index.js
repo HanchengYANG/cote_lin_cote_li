@@ -51,15 +51,6 @@ async function getActiveSale() {
   }
 }
 
-async function getSaleById(saleId) {
-  try {
-    const r = await db.collection('sales').doc(saleId).get()
-    return r.data || null
-  } catch (err) {
-    return null
-  }
-}
-
 function toSafeInt(v, fallback = 0) {
   const n = Number(v)
   if (!Number.isFinite(n)) return fallback
@@ -68,7 +59,6 @@ function toSafeInt(v, fallback = 0) {
 
 function normalizeSaleDishConfigs(sale) {
   const raw = Array.isArray(sale && sale.dishConfigs) ? sale.dishConfigs : []
-  const saleDishIds = Array.isArray(sale && sale.dishIds) ? sale.dishIds.filter(Boolean).map((x) => String(x)) : []
   const seen = new Set()
   const out = []
   for (const item of raw) {
@@ -79,20 +69,21 @@ function normalizeSaleDishConfigs(sale) {
     out.push({ dishId, limitQty, soldQty })
     seen.add(dishId)
   }
-  // Fallback for incomplete configs during development.
-  for (const dishId of saleDishIds) {
-    if (seen.has(dishId)) continue
-    out.push({ dishId, limitQty: 999999, soldQty: 0 })
-    seen.add(dishId)
-  }
   return out
 }
 
-function dishConfigMapFromSale(sale) {
-  const cfg = normalizeSaleDishConfigs(sale)
-  const map = new Map()
-  for (const x of cfg) map.set(x.dishId, { ...x })
-  return map
+function validateSaleDishConfigs(sale, normalizedConfigs) {
+  const saleDishIds = Array.isArray(sale && sale.dishIds) ? sale.dishIds.filter(Boolean).map((x) => String(x)) : []
+  const saleSet = new Set(saleDishIds)
+  const cfg = Array.isArray(normalizedConfigs) ? normalizedConfigs : normalizeSaleDishConfigs(sale)
+  const cfgSet = new Set(cfg.map((x) => x.dishId))
+  if (saleSet.size === 0) return { ok: false, message: 'Sale has no dishIds' }
+  if (cfgSet.size === 0) return { ok: false, message: 'Sale has no dishConfigs' }
+  if (cfgSet.size !== saleSet.size) return { ok: false, message: 'sale.dishIds and sale.dishConfigs mismatch' }
+  for (const dishId of saleSet) {
+    if (!cfgSet.has(dishId)) return { ok: false, message: `dish config missing: ${dishId}` }
+  }
+  return { ok: true }
 }
 
 function throwBiz(code, message, detail) {
@@ -212,10 +203,94 @@ exports.main = async (event) => {
   const wxContext = cloud.getWXContext()
   const openId = wxContext.OPENID
 
+  if (action === 'listActiveDishesForBrowse') {
+    const r = await db
+      .collection('dishes')
+      .where({ isActive: true })
+      .orderBy('updatedAt', 'desc')
+      .limit(200)
+      .get()
+    const dishes = (r.data || []).map((d) => ({
+      ...d,
+      images: normalizeImageIds(d.images),
+      descPlain: String(d.descPlain || ''),
+    }))
+    const firstIds = dishes.map((d) => d.images[0] || '').filter(Boolean)
+    const urlMap = await getTempUrlMap(firstIds)
+    const out = dishes.map((d) => ({
+      _id: d._id,
+      name: d.name,
+      priceCents: d.priceCents || 0,
+      descPlain: d.descPlain,
+      images: d.images,
+      thumbUrl: urlMap.get(d.images[0] || '') || '',
+    }))
+    return ok({ dishes: out })
+  }
+
+  if (action === 'bootstrapHome') {
+    const sale = await getActiveSale()
+    const r = await db
+      .collection('dishes')
+      .where({ isActive: true })
+      .orderBy('updatedAt', 'desc')
+      .limit(200)
+      .get()
+    const dishes = (r.data || []).map((d) => ({
+      ...d,
+      images: normalizeImageIds(d.images),
+      descPlain: String(d.descPlain || ''),
+    }))
+    const firstIds = dishes.map((d) => d.images[0] || '').filter(Boolean)
+    const urlMap = await getTempUrlMap(firstIds)
+
+    let saleInfo = {
+      isOpen: false,
+      saleId: '',
+      deliveryTimeSlotLabel: '',
+    }
+    let cfgMap = new Map()
+    if (sale) {
+      const normalizedConfigs = normalizeSaleDishConfigs(sale)
+      const configCheck = validateSaleDishConfigs(sale, normalizedConfigs)
+      if (!configCheck.ok) return fail('SALE_CONFIG_INVALID', configCheck.message)
+      cfgMap = new Map(normalizedConfigs.map((x) => [x.dishId, { ...x }]))
+      saleInfo = {
+        isOpen: true,
+        saleId: String(sale._id || ''),
+        deliveryTimeSlotLabel: String(sale.deliveryTimeSlotLabel || ''),
+      }
+    }
+
+    const out = dishes.map((d) => {
+      const cfg = cfgMap.get(d._id) || null
+      const limitQty = cfg ? cfg.limitQty : 0
+      const soldQty = cfg ? cfg.soldQty : 0
+      const remainingQty = cfg ? Math.max(0, limitQty - soldQty) : 0
+      return {
+        _id: d._id,
+        name: d.name,
+        priceCents: d.priceCents || 0,
+        descPlain: d.descPlain,
+        images: d.images,
+        thumbUrl: urlMap.get(d.images[0] || '') || '',
+        inSale: !!cfg,
+        limitQty,
+        soldQty,
+        remainingQty,
+        isSoldOut: !!cfg && soldQty >= limitQty,
+      }
+    })
+    return ok({ sale: saleInfo, dishes: out })
+  }
+
   if (action === 'getCurrentSale') {
     const sale = await getActiveSale()
     if (!sale) return ok({ sale: null, dishes: [] })
-    const cfgMap = dishConfigMapFromSale(sale)
+    const normalizedConfigs = normalizeSaleDishConfigs(sale)
+    const configCheck = validateSaleDishConfigs(sale, normalizedConfigs)
+    if (!configCheck.ok) return fail('SALE_CONFIG_INVALID', configCheck.message)
+    const cfgMap = new Map(normalizedConfigs.map((x) => [x.dishId, { ...x }]))
     const dishes = (await getDishesByIds(sale.dishIds || [])).map((d) => ({
       ...d,
       images: normalizeImageIds(d.images),
@@ -230,7 +305,7 @@ exports.main = async (event) => {
       remainingQty: cfgMap.has(d._id) ? Math.max(0, cfgMap.get(d._id).limitQty - cfgMap.get(d._id).soldQty) : 0,
       isSoldOut: cfgMap.has(d._id) ? cfgMap.get(d._id).soldQty >= cfgMap.get(d._id).limitQty : true,
     }))
-    return ok({ sale: { ...sale, dishConfigs: normalizeSaleDishConfigs(sale) }, dishes: out })
+    return ok({ sale: { ...sale, dishConfigs: normalizedConfigs }, dishes: out })
   }
 
   if (action === 'getDishDetail') {
@@ -361,7 +436,10 @@ exports.main = async (event) => {
         }
         if (!sale || sale.status !== 'OPEN') throwBiz('ORDER_LOCKED', 'Sale closed, customer edit disabled')
 
-        const cfgMap = dishConfigMapFromSale(sale)
+        const normalizedConfigs = normalizeSaleDishConfigs(sale)
+        const configCheck = validateSaleDishConfigs(sale, normalizedConfigs)
+        if (!configCheck.ok) throwBiz('SALE_CONFIG_INVALID', configCheck.message)
+        const cfgMap = new Map(normalizedConfigs.map((x) => [x.dishId, { ...x }]))
         const oldItems = Array.isArray(order.items) ? order.items : []
         const oldMap = new Map()
         for (const it of oldItems) {
@@ -428,7 +506,7 @@ exports.main = async (event) => {
         }
         if (nextItems.length === 0) throwBiz('BAD_REQUEST', 'Order cannot be empty, cancel it instead')
 
-        const updatedConfigs = normalizeSaleDishConfigs(sale).map((x) => {
+        const updatedConfigs = normalizedConfigs.map((x) => {
           const cur = cfgMap.get(x.dishId)
           return cur ? { dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty } : x
         })
@@ -490,7 +568,10 @@ exports.main = async (event) => {
         }
         if (!sale || sale.status !== 'OPEN') throwBiz('ORDER_LOCKED', 'Sale closed, customer cancel disabled')
 
-        const cfgMap = dishConfigMapFromSale(sale)
+        const normalizedConfigs = normalizeSaleDishConfigs(sale)
+        const configCheck = validateSaleDishConfigs(sale, normalizedConfigs)
+        if (!configCheck.ok) throwBiz('SALE_CONFIG_INVALID', configCheck.message)
+        const cfgMap = new Map(normalizedConfigs.map((x) => [x.dishId, { ...x }]))
         for (const it of (order.items || [])) {
           const dishId = String((it && it.dishId) || '').trim()
           const qty = toSafeInt(it && it.qty, 0)
@@ -500,7 +581,7 @@ exports.main = async (event) => {
           cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) - qty)
           cfgMap.set(dishId, cfgItem)
         }
-        const updatedConfigs = normalizeSaleDishConfigs(sale).map((x) => {
+        const updatedConfigs = normalizedConfigs.map((x) => {
           const cur = cfgMap.get(x.dishId)
           return cur ? { dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty } : x
         })
@@ -626,7 +707,10 @@ exports.main = async (event) => {
           if (!d || !d.isActive) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
         }
 
-        const cfgMap = dishConfigMapFromSale(saleDoc)
+        const normalizedConfigs = normalizeSaleDishConfigs(saleDoc)
+        const configCheck = validateSaleDishConfigs(saleDoc, normalizedConfigs)
+        if (!configCheck.ok) throwBiz('SALE_CONFIG_INVALID', configCheck.message)
+        const cfgMap = new Map(normalizedConfigs.map((x) => [x.dishId, { ...x }]))
         const outOfStock = []
         for (const dishId of mergedDishIds) {
           const newQty = toSafeInt(mergedQtyById.get(dishId), 0)
@@ -657,7 +741,7 @@ exports.main = async (event) => {
           cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) + delta)
           cfgMap.set(dishId, cfgItem)
         }
-        const updatedConfigs = normalizeSaleDishConfigs(saleDoc).map((x) => {
+        const updatedConfigs = normalizedConfigs.map((x) => {
           const cur = cfgMap.get(x.dishId)
           return cur ? { dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty } : x
         })

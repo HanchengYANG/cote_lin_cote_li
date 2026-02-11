@@ -37,6 +37,22 @@ page {
   align-items: center;
   justify-content: space-between;
 }
+.left-row {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+.thumb {
+  width: 84rpx;
+  height: 84rpx;
+  border-radius: 16rpx;
+  background: rgba(0, 0, 0, 0.06);
+  flex: none;
+}
+.left-text {
+  display: flex;
+  flex-direction: column;
+}
 .name {
   font-weight: 700;
   font-size: 30rpx;
@@ -48,4 +64,3 @@ page {
   font-size: 24rpx;
   margin-top: 6rpx;
 }
-

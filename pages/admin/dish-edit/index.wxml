@@ -6,10 +6,36 @@
       <input class="input" placeholder="例如：番茄鸡蛋" value="{{name}}" bindinput="onName" />
     </view>
     <view class="card">
-      <view class="title">价格（元）</view>
-      <input class="input" placeholder="例如：12.50" type="digit" value="{{priceYuan}}" bindinput="onPrice" />
-      <view class="muted small">系统内部按“分”存储</view>
+      <view class="title">价格（EUR）</view>
+      <input class="input" placeholder="例如：12.50" type="digit" value="{{priceEuro}}" bindinput="onPrice" />
+      <view class="muted small">系统内部按“欧分(cents)”存储</view>
     </view>
+
+    <view class="card">
+      <view class="title">图片（最多 10 张）</view>
+      <scroll-view class="img-row" scroll-x enable-flex="true">
+        <view class="img-list">
+          <view class="img-item" wx:for="{{imageUrls}}" wx:key="index">
+            <image class="img" mode="aspectFill" src="{{item}}" />
+            <view class="img-ops">
+              <view class="op" bindtap="moveUp" data-i="{{index}}">上移</view>
+              <view class="op" bindtap="moveDown" data-i="{{index}}">下移</view>
+              <view class="op danger" bindtap="removeImg" data-i="{{index}}">删除</view>
+            </view>
+          </view>
+        </view>
+      </scroll-view>
+      <view class="img-add">
+        <button class="btn ghost" size="mini" loading="{{uploading || choosing}}" disabled="{{uploading || choosing || images.length>=10}}" bindtap="addImages">添加图片</button>
+      </view>
+      <view class="muted small">图片将上传到云存储，保存后顾客端展示</view>
+    </view>
+
+    <view class="card">
+      <view class="title">描述（Markdown）</view>
+      <textarea class="textarea" placeholder="支持：标题/加粗/斜体/列表/代码块/链接（链接将显示为文本，不可跳转）" value="{{descMd}}" bindinput="onDesc"></textarea>
+    </view>
+
     <view class="card">
       <view class="title">上架</view>
       <switch checked="{{isActive}}" bindchange="onActive" />
@@ -17,4 +43,3 @@
     <button class="btn" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存</button>
   </view>
 </scroll-view>
-

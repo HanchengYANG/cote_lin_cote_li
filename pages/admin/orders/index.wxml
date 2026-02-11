@@ -27,7 +27,7 @@
           <view class="muted small">电话：{{item.contact.phone}}</view>
           <view class="muted small" wx:if="{{item.deliveryTimeSlotLabelSnapshot}}">时间段：{{item.deliveryTimeSlotLabelSnapshot}}</view>
         </view>
-        <view class="muted small">￥{{item.totals.amountYuan}}（{{item.totals.qty}}件）</view>
+        <view class="muted small">€{{item.totals.amountEuro}}（{{item.totals.qty}}件）</view>
       </view>
     </view>
   </view>

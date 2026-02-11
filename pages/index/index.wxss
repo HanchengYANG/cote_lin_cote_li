@@ -3,7 +3,7 @@ page {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #f6f7fb;
+  background: #f5f5f5;
 }
 .scrollarea {
   flex: 1;
@@ -11,32 +11,32 @@ page {
 }
 
 .page {
-  padding: 24rpx 24rpx 140rpx;
+  padding: 20rpx 24rpx 150rpx;
 }
 
-.admin-row {
+.actions-row {
   display: flex;
-  justify-content: flex-end;
-  margin-bottom: 16rpx;
+  justify-content: flex-start;
+  margin-bottom: 12rpx;
+}
+
+.actions-row .btn {
+  margin-right: 12rpx;
+}
+
+.info-strip {
+  background: #fffbe8;
+  border: 1rpx solid #f1e1a6;
+  border-radius: 14rpx;
+  padding: 12rpx 16rpx;
+  margin-bottom: 14rpx;
 }
 
 .card {
   background: #fff;
-  border-radius: 20rpx;
-  padding: 22rpx;
-  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.06);
-  margin-bottom: 18rpx;
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.title {
-  font-size: 34rpx;
-  font-weight: 700;
+  border-radius: 16rpx;
+  padding: 20rpx;
+  margin-bottom: 14rpx;
 }
 
 .muted {
@@ -48,59 +48,162 @@ page {
   margin-top: 8rpx;
 }
 
-.spacer {
-  height: 16rpx;
+.dish-list {
+  display: flex;
+  flex-direction: column;
 }
 
-.list {
-  background: #fff;
-  border-radius: 20rpx;
-  overflow: hidden;
-  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.06);
-}
-
-.dish {
+.dish-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 20rpx 22rpx;
-  border-bottom: 1rpx solid rgba(0, 0, 0, 0.06);
+  background: #fff;
+  border-radius: 18rpx;
+  padding: 12rpx;
+  margin-bottom: 14rpx;
 }
 
-.dish:last-child {
-  border-bottom: none;
+.dish-left {
+  width: 176rpx;
+  height: 176rpx;
+  flex: none;
+}
+
+.dish-center {
+  flex: 1;
+  min-width: 0;
+  margin-left: 14rpx;
+}
+
+.dish-right {
+  width: 190rpx;
+  margin-left: 10rpx;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .dish-name {
+  font-size: 31rpx;
+  font-weight: 600;
+  line-height: 1.3;
+  min-height: 80rpx;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.price-row {
+  margin-top: 8rpx;
+  display: flex;
+  align-items: center;
+}
+
+.dish-price {
+  color: #1d1d1f;
+  font-size: 44rpx;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.dish-thumb {
+  width: 176rpx;
+  height: 176rpx;
+  border-radius: 14rpx;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.dish-thumb.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 24rpx;
+}
+
+.badge {
+  margin-left: 12rpx;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  height: 36rpx;
+  padding: 0 14rpx;
+  font-size: 20rpx;
+}
+
+.badge.ok {
+  color: #fff;
+  background: #111;
+}
+
+.badge.sold-out {
+  color: #666;
+  background: #ececec;
+}
+
+.badge.closed {
+  color: #666;
+  background: #f2f2f2;
+}
+
+.badge.not-open {
+  color: #666;
+  background: #f2f2f2;
+}
+
+.dish-desc {
+  margin-top: 6rpx;
+  font-size: 24rpx;
+  color: rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  min-height: 62rpx;
+}
+
+.dish-meta {
+  margin-top: 4rpx;
+  font-size: 22rpx;
+  color: rgba(0, 0, 0, 0.48);
+}
+
+.qty {
+  min-width: 40rpx;
+  margin: 0 8rpx;
+  text-align: center;
   font-size: 30rpx;
   font-weight: 600;
 }
 
-.dish-price {
-  margin-top: 6rpx;
-  color: rgba(0, 0, 0, 0.6);
-  font-size: 26rpx;
-}
-
-.dish-ops {
-  display: flex;
-  align-items: center;
-}
-
-.qty {
-  width: 64rpx;
-  text-align: center;
-  font-size: 30rpx;
-}
-
 .qty-btn {
-  width: 64rpx;
-  height: 56rpx;
-  line-height: 56rpx;
+  width: 60rpx;
+  height: 60rpx;
+  line-height: 60rpx;
   padding: 0;
-  border-radius: 14rpx;
-  background: #111;
+  border-radius: 50%;
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+.qty-btn::after {
+  border: none;
+}
+
+.minus-btn {
+  background: #ef4444;
   color: #fff;
+}
+
+.plus-btn {
+  background: #f0d93a;
+  color: #111;
+}
+
+.qty-btn[disabled] {
+  opacity: 0.3;
 }
 
 .bottom-bar {
@@ -114,7 +217,7 @@ page {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  box-shadow: 0 18rpx 50rpx rgba(0, 0, 0, 0.14);
+  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.12);
 }
 
 .bottom-left {

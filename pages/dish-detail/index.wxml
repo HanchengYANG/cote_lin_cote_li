@@ -1,0 +1,32 @@
+<navigation-bar title="菜品详情" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="page">
+    <view class="card" wx:if="{{loading}}">
+      <view class="muted">加载中...</view>
+    </view>
+
+    <view wx:elif="{{!dish}}">
+      <view class="card">
+        <view class="muted">菜品不存在或已下架</view>
+      </view>
+    </view>
+
+    <view wx:else>
+      <view class="card">
+        <swiper class="sw" indicator-dots="{{dish.imageUrls.length>1}}" autoplay="{{false}}" circular="{{false}}">
+          <swiper-item wx:for="{{dish.imageUrls}}" wx:key="index">
+            <image class="img" mode="aspectFill" src="{{item}}" />
+          </swiper-item>
+        </swiper>
+        <view class="name">{{dish.name}}</view>
+        <view class="price">€{{dish.priceEuro}}</view>
+      </view>
+
+      <view class="card" wx:if="{{dish.descHtml}}">
+        <view class="title">介绍</view>
+        <rich-text nodes="{{dish.descHtml}}"></rich-text>
+        <button class="btn ghost" size="mini" bindtap="copyMd">复制描述</button>
+      </view>
+    </view>
+  </view>
+</scroll-view>

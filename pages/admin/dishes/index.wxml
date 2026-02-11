@@ -8,8 +8,13 @@
     <view class="list">
       <view class="item" wx:for="{{dishes}}" wx:key="_id">
         <view class="left" bindtap="edit" data-id="{{item._id}}">
-          <view class="name">{{item.name}}</view>
-          <view class="muted small">￥{{item.priceYuan}}</view>
+          <view class="left-row">
+            <image wx:if="{{item.thumb}}" class="thumb" mode="aspectFill" src="{{item.thumb}}" />
+            <view class="left-text">
+              <view class="name">{{item.name}}</view>
+              <view class="muted small">€{{item.priceEuro}}</view>
+            </view>
+          </view>
         </view>
         <view class="right">
           <switch checked="{{item.isActive}}" bindchange="toggle" data-id="{{item._id}}" />
@@ -18,4 +23,3 @@
     </view>
   </view>
 </scroll-view>
-

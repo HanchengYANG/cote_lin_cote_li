@@ -4,48 +4,12 @@ page {
   flex-direction: column;
   background: #f6f7fb;
 }
+
 .scrollarea {
   flex: 1;
   overflow-y: hidden;
 }
+
 .page {
   padding: 24rpx;
 }
-.card {
-  background: #fff;
-  border-radius: 20rpx;
-  padding: 22rpx;
-  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.06);
-  margin-bottom: 18rpx;
-}
-.row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 32rpx;
-  font-weight: 700;
-  margin-bottom: 14rpx;
-}
-.muted {
-  color: rgba(0, 0, 0, 0.55);
-}
-.small {
-  font-size: 24rpx;
-}
-.line {
-  display: flex;
-  justify-content: space-between;
-  padding: 10rpx 0;
-}
-.hr {
-  height: 1rpx;
-  background: rgba(0, 0, 0, 0.06);
-  margin: 14rpx 0;
-}
-.sum {
-  font-weight: 800;
-  font-size: 32rpx;
-}
-

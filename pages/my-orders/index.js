@@ -1,23 +1,5 @@
 const { call } = require('../../utils/api')
-const { formatTime, fenToYuan } = require('../../utils/format')
-
-function decorateOrder(o) {
-  const statusText = o.status === 'CANCELLED' ? '已取消' : '有效'
-  const statusClass = o.status === 'CANCELLED' ? 'cancel' : 'ok'
-  const fulfillmentText = o.fulfillmentType === 'pickup' ? '自取' : '配送'
-  const totals = o.totals || { amountFen: 0, qty: 0 }
-  return {
-    ...o,
-    statusText,
-    statusClass,
-    fulfillmentText,
-    createdAtText: formatTime(o.createdAt),
-    totals: {
-      qty: totals.qty || 0,
-      amountYuan: fenToYuan(totals.amountFen || 0),
-    },
-  }
-}
+const { decorateOrderSummary } = require('../../utils/order-list')
 
 Page({
   data: {
@@ -47,7 +29,7 @@ Page({
       const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0
       return tb - ta
     })
-    const orders = raw.map(decorateOrder)
+    const orders = raw.map(decorateOrderSummary)
     this.setData({ orders })
   },
 

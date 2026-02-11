@@ -1,0 +1,75 @@
+<view class="card" wx:if="{{!order}}">
+  <view class="muted">加载中...</view>
+</view>
+
+<view wx:else>
+  <view class="card">
+    <view class="row">
+      <view class="title">订单号</view>
+      <view class="muted small">{{order._id}}</view>
+    </view>
+    <view class="muted small">状态：{{order.statusText}}</view>
+    <view class="muted small">时间：{{order.createdAtText}}</view>
+  </view>
+
+  <view class="card">
+    <view class="title">履约</view>
+    <view class="muted small">{{order.fulfillmentText}}</view>
+    <view class="muted small" wx:if="{{order.deliveryTimeSlotLabelSnapshot}}">时间段：{{order.deliveryTimeSlotLabelSnapshot}}</view>
+  </view>
+
+  <view class="card">
+    <view class="title">联系方式</view>
+    <view class="muted small" wx:if="{{order.contact && order.contact.phone}}">电话：{{order.contact.phone}}</view>
+    <view class="muted small" wx:if="{{order.fulfillmentType==='delivery'}}">地址：{{order.addressText}}</view>
+  </view>
+
+  <view class="card">
+    <view class="row">
+      <view class="title">菜品</view>
+      <view class="muted small" wx:if="{{canEditItems}}">可编辑</view>
+    </view>
+    <view class="line edit-line" wx:for="{{editableItems}}" wx:key="dishId">
+      <view class="line-main">
+        <view>{{item.dishName}}</view>
+        <view class="muted small">€{{item.unitPriceEuro}} x {{item.qty}}</view>
+      </view>
+      <view class="line-side">
+        <view class="line-total">€{{item.lineTotalEuro}}</view>
+        <view class="qty-ops" wx:if="{{canEditItems}}">
+          <view class="op-btn" data-id="{{item.dishId}}" data-delta="-1" bindtap="onQtyTap">-</view>
+          <view class="qty">{{item.qty}}</view>
+          <view class="op-btn" data-id="{{item.dishId}}" data-delta="1" bindtap="onQtyTap">+</view>
+          <view class="op-btn danger" data-id="{{item.dishId}}" bindtap="onRemoveTap">删除</view>
+        </view>
+      </view>
+    </view>
+    <view class="hr"></view>
+    <view class="row">
+      <view class="muted">总计</view>
+      <view class="sum">€{{editableTotals.amountEuro}}</view>
+    </view>
+  </view>
+
+  <view class="card" wx:if="{{canEditItems || canCancelOrder}}">
+    <view class="muted small" wx:if="{{canEditItems && editHint}}">{{editHint}}</view>
+    <view class="action-row {{(canEditItems && canCancelOrder) ? '' : 'single'}}">
+      <button class="btn ghost" wx:if="{{canEditItems}}" loading="{{saving}}" disabled="{{saving || cancelling}}" bindtap="onSaveTap">保存修改</button>
+      <button class="btn danger-btn" wx:if="{{canCancelOrder}}" loading="{{cancelling}}" disabled="{{saving || cancelling}}" bindtap="onCancelTap">取消整单</button>
+    </view>
+  </view>
+  <view class="card" wx:else>
+    <view class="muted small">{{lockHint}}</view>
+  </view>
+
+  <view class="card">
+    <view class="title">付款</view>
+    <view class="muted small">方式：{{order.payment && order.payment.method ? order.payment.method : '-'}}</view>
+    <view class="muted small" wx:if="{{showPaymentStatus}}">状态：{{order.payment && order.payment.paidStatus ? order.payment.paidStatus : '-'}}</view>
+  </view>
+
+  <view class="card" wx:if="{{order.remark}}">
+    <view class="title">备注</view>
+    <view class="muted small">{{order.remark}}</view>
+  </view>
+</view>

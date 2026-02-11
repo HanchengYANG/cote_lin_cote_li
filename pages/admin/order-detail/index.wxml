@@ -1,56 +1,21 @@
 <navigation-bar title="订单详情" back="{{true}}" color="black" background="#FFF"></navigation-bar>
 <scroll-view class="scrollarea" scroll-y type="list">
   <view class="page">
-    <view class="card" wx:if="{{!order}}">
-      <view class="muted">加载中...</view>
-    </view>
-
-    <view wx:else>
-      <view class="card">
-        <view class="title">订单号</view>
-        <view class="muted small">{{order._id}}</view>
-        <view class="muted small">状态：{{order.statusText}}</view>
-        <view class="muted small">下单时间：{{order.createdAtText}}</view>
-      </view>
-
-      <view class="card">
-        <view class="title">履约</view>
-        <view class="muted small">{{order.fulfillmentText}}</view>
-        <view class="muted small" wx:if="{{order.deliveryTimeSlotLabelSnapshot}}">时间段：{{order.deliveryTimeSlotLabelSnapshot}}</view>
-      </view>
-
-      <view class="card">
-        <view class="title">客户</view>
-        <view class="muted small">电话：{{order.contact.phone}}</view>
-        <view class="muted small" wx:if="{{order.fulfillmentType==='delivery'}}">地址：{{order.addressText}}</view>
-      </view>
-
-      <view class="card">
-        <view class="title">菜品</view>
-        <view class="line" wx:for="{{order.items}}" wx:key="dishId">
-          <view>{{item.dishName}} x {{item.qty}}</view>
-          <view>￥{{item.lineTotalYuan}}</view>
-        </view>
-        <view class="hr"></view>
-        <view class="row">
-          <view class="muted">总计</view>
-          <view class="sum">￥{{order.totals.amountYuan}}</view>
-        </view>
-      </view>
-
-      <view class="card">
-        <view class="title">付款</view>
-        <view class="muted small">方式：{{order.payment.method}}</view>
-        <view class="muted small">状态：{{order.payment.paidStatus}}</view>
-      </view>
-
-      <view class="card" wx:if="{{order.remark}}">
-        <view class="title">备注</view>
-        <view class="muted small">{{order.remark}}</view>
-      </view>
-
-      <button class="btn danger" disabled="{{order.status==='CANCELLED'}}" bindtap="cancel">取消订单</button>
-    </view>
+    <order-editor
+      order="{{order}}"
+      editable-items="{{editableItems}}"
+      editable-totals="{{editableTotals}}"
+      can-edit-items="{{canEditItems}}"
+      can-cancel-order="{{canCancelOrder}}"
+      saving="{{saving}}"
+      cancelling="{{cancelling}}"
+      show-payment-status="{{true}}"
+      edit-hint="店主可直接修改本单菜品数量；如需整单作废请点“取消整单”。"
+      lock-hint="订单已取消，不可编辑。"
+      bindqtychange="onQtyChange"
+      bindremoveitem="onRemoveItem"
+      bindsave="onSaveItems"
+      bindcancelorder="onCancelOrder"
+    />
   </view>
 </scroll-view>
-
