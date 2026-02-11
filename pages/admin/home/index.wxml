@@ -18,6 +18,7 @@
           <view class="muted small">配送时间段：{{activeSale.deliveryTimeSlotLabel}}</view>
           <view class="muted small">订单数：{{stats.orderCount}}</view>
           <view class="row">
+            <button class="btn ghost" size="mini" bindtap="goActiveSaleEdit">编辑开单</button>
             <button class="btn ghost" size="mini" bindtap="goOrders">订单</button>
             <button class="btn danger" size="mini" bindtap="closeSale">截单</button>
           </view>

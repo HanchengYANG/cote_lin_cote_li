@@ -6,9 +6,24 @@
     </view>
 
     <view wx:else>
+      <view class="card warn" wx:if="{{openDisabled}}">
+        <view class="title">提示</view>
+        <view class="muted small">当前已有开单中开单，必须先“截单”后才能再开单。</view>
+        <button class="btn ghost" size="mini" bindtap="goAdminHome">去截单</button>
+      </view>
+
       <view class="card">
         <view class="title">配送时间段（必填，仅一个）</view>
-        <input class="input" placeholder="例如：2026年2月10日 15:00-18:00" value="{{sale.deliveryTimeSlotLabel}}" bindinput="onSlotLabel" />
+        <picker mode="date" value="{{slotDate}}" bindchange="onPickDate">
+          <view class="picker">日期：{{slotDate || '请选择'}}</view>
+        </picker>
+        <picker mode="time" value="{{slotStart}}" bindchange="onPickStart">
+          <view class="picker">开始：{{slotStart || '请选择'}}</view>
+        </picker>
+        <picker mode="time" value="{{slotEnd}}" bindchange="onPickEnd">
+          <view class="picker">结束：{{slotEnd || '请选择'}}</view>
+        </picker>
+        <view class="muted small">展示文案：{{slotLabel}}</view>
       </view>
 
       <view class="card">
@@ -17,20 +32,31 @@
       </view>
 
       <view class="card">
-        <view class="title">本次售卖菜品</view>
+        <view class="title">本次售卖菜品与总量</view>
         <view class="muted small" wx:if="{{dishes.length===0}}">请先到菜品库新增菜品</view>
         <checkbox-group bindchange="onDishSelect">
-          <label class="check" wx:for="{{dishes}}" wx:key="_id">
+          <view class="check" wx:for="{{dishes}}" wx:key="_id">
             <checkbox value="{{item._id}}" checked="{{item.selected}}" />
-            <text>{{item.name}} ￥{{item.priceYuan}}</text>
-            <text class="muted small" wx:if="{{!item.isActive}}">（已下架）</text>
-          </label>
+            <view class="check-main">
+              <text>{{item.name}} €{{item.priceEuro}}</text>
+              <text class="muted small" wx:if="{{!item.isActive}}">（已下架）</text>
+            </view>
+            <input
+              wx:if="{{item.selected}}"
+              class="qty-input"
+              type="number"
+              placeholder="总量"
+              value="{{item.limitQtyInput}}"
+              data-id="{{item._id}}"
+              bindinput="onLimitInput"
+            />
+          </view>
         </checkbox-group>
+        <view class="muted small">说明：每个已选菜都必须填写本次开单总量（非负整数）。</view>
       </view>
 
       <button class="btn" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存草稿</button>
-      <button class="btn ghost" loading="{{opening}}" disabled="{{opening}}" bindtap="openSale">开单</button>
+      <button class="btn ghost" loading="{{opening}}" disabled="{{opening || openDisabled}}" bindtap="openSale">开单</button>
     </view>
   </view>
 </scroll-view>
-

@@ -11,8 +11,6 @@
       <view class="muted small">请稍后再试</view>
       <view class="spacer"></view>
       <button class="btn ghost" size="mini" bindtap="goMyOrders">我的订单</button>
-      <view wx:if="{{isAdmin}}" class="spacer"></view>
-      <button wx:if="{{isAdmin}}" class="btn" bindtap="goAdminSaleDraft">去开单</button>
     </view>
 
     <view wx:else class="card">
@@ -26,14 +24,20 @@
 
     <view wx:if="{{sale}}" class="list">
       <view class="dish" wx:for="{{dishes}}" wx:key="_id">
-        <view class="dish-main">
-          <view class="dish-name">{{item.name}}</view>
-          <view class="dish-price">￥{{item.priceYuan}}</view>
+        <view class="dish-main" bindtap="goDishDetail" data-id="{{item._id}}">
+          <image wx:if="{{item.thumb}}" class="dish-thumb" mode="aspectFill" src="{{item.thumb}}" />
+          <view class="dish-text">
+            <view class="dish-name">{{item.name}}</view>
+            <view class="dish-price">€{{item.priceEuro}}</view>
+            <view class="muted small" wx:if="{{item.isSoldOut}}">售罄</view>
+            <view class="muted small" wx:elif="{{item.remainingQty>=0}}">剩余 {{item.remainingQty}}</view>
+            <view class="dish-desc" wx:if="{{item.descPlain}}">{{item.descPlain}}</view>
+          </view>
         </view>
         <view class="dish-ops">
           <button class="qty-btn" size="mini" bindtap="dec" data-id="{{item._id}}">-</button>
           <text class="qty">{{item.qty}}</text>
-          <button class="qty-btn" size="mini" bindtap="inc" data-id="{{item._id}}">+</button>
+          <button class="qty-btn" size="mini" disabled="{{item.isSoldOut}}" bindtap="inc" data-id="{{item._id}}">+</button>
         </view>
       </view>
     </view>
@@ -41,9 +45,10 @@
     <view wx:if="{{sale}}" class="bottom-bar">
       <view class="bottom-left">
         <view class="muted small">已选 {{totalQty}} 件</view>
-        <view class="sum">合计 ￥{{totalAmountYuan}}</view>
+        <view class="muted small" wx:if="{{hasExistingOrder}}">将追加到你当前订单</view>
+        <view class="sum">合计 €{{totalAmountEuro}}</view>
       </view>
-      <button class="btn" disabled="{{totalQty===0}}" bindtap="goCheckout">去结算</button>
+      <button class="btn" disabled="{{totalQty===0}}" bindtap="goCheckout">{{hasExistingOrder ? '追加到订单' : '去结算'}}</button>
     </view>
   </view>
 </scroll-view>

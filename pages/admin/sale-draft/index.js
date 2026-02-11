@@ -1,15 +1,26 @@
 const { call } = require('../../../utils/api')
-const { fenToYuan } = require('../../../utils/format')
+const { centToEuro } = require('../../../utils/format')
 
-function applySelected(dishes, dishIds) {
+function applySelected(dishes, dishIds, limitMap) {
   const set = new Set(dishIds || [])
-  return dishes.map((d) => ({ ...d, selected: set.has(d._id) }))
+  return dishes.map((d) => ({
+    ...d,
+    selected: set.has(d._id),
+    limitQtyInput: limitMap[d._id] || '',
+  }))
 }
 
 Page({
   data: {
     sale: null,
     dishes: [],
+    limitMap: {},
+    slotDate: '',
+    slotStart: '',
+    slotEnd: '',
+    slotLabel: '',
+    activeSale: null,
+    openDisabled: false,
     saving: false,
     opening: false,
   },
@@ -28,20 +39,81 @@ Page({
       return
     }
     const sale = saleRes.data.sale
+    const limitMap = this.parseLimitMapFromSale(sale)
     let dishes = []
     if (dishesRes.ok) {
       dishes = (dishesRes.data.dishes || []).map((d) => ({
         ...d,
-        priceYuan: fenToYuan(d.priceFen || 0),
+        priceEuro: centToEuro(d.priceCents || 0),
       }))
     }
-    dishes = applySelected(dishes, sale.dishIds || [])
-    this.setData({ sale, dishes })
+    dishes = applySelected(dishes, sale.dishIds || [], limitMap)
+    const parsed = this.parseSlotFromSale(sale)
+
+    const dashRes = await call('admin', 'getDashboard')
+    const activeSale = (dashRes.ok && dashRes.data && dashRes.data.activeSale) ? dashRes.data.activeSale : null
+    const openDisabled = !!(activeSale && activeSale.status === 'OPEN')
+
+    this.setData({
+      sale,
+      dishes,
+      limitMap,
+      slotDate: parsed.slotDate,
+      slotStart: parsed.slotStart,
+      slotEnd: parsed.slotEnd,
+      slotLabel: parsed.slotLabel,
+      activeSale,
+      openDisabled,
+    })
   },
 
-  onSlotLabel(e) {
-    const sale = { ...this.data.sale, deliveryTimeSlotLabel: e.detail.value }
-    this.setData({ sale })
+  parseSlotFromSale(sale) {
+    const slotDate = sale.deliverySlotDate || ''
+    const slotStart = sale.deliverySlotStartTime || ''
+    const slotEnd = sale.deliverySlotEndTime || ''
+    const slotLabel = slotDate && slotStart && slotEnd ? `${slotDate} ${slotStart}-${slotEnd}` : ''
+    return { slotDate, slotStart, slotEnd, slotLabel }
+  },
+
+  recomputeSlotLabel() {
+    const { slotDate, slotStart, slotEnd } = this.data
+    if (slotDate && slotStart && slotEnd) return `${slotDate} ${slotStart}-${slotEnd}`
+    return ''
+  },
+
+  parseLimitMapFromSale(sale) {
+    const map = {}
+    const cfg = Array.isArray(sale && sale.dishConfigs) ? sale.dishConfigs : []
+    for (const it of cfg) {
+      const dishId = String((it && it.dishId) || '').trim()
+      if (!dishId) continue
+      const limitQty = Number(it && it.limitQty)
+      if (!Number.isFinite(limitQty) || limitQty < 0) continue
+      map[dishId] = String(Math.floor(limitQty))
+    }
+    for (const dishId of (sale && sale.dishIds) || []) {
+      if (!map[dishId]) map[dishId] = ''
+    }
+    return map
+  },
+
+  onPickDate(e) {
+    this.setData({ slotDate: e.detail.value })
+    this.setData({ slotLabel: this.recomputeSlotLabel() })
+  },
+
+  onPickStart(e) {
+    this.setData({ slotStart: e.detail.value })
+    this.setData({ slotLabel: this.recomputeSlotLabel() })
+  },
+
+  onPickEnd(e) {
+    this.setData({ slotEnd: e.detail.value })
+    this.setData({ slotLabel: this.recomputeSlotLabel() })
+  },
+
+  goAdminHome() {
+    wx.navigateTo({ url: '/pages/admin/home/index' })
   },
 
   onNote(e) {
@@ -52,13 +124,43 @@ Page({
   onDishSelect(e) {
     const ids = e.detail.value || []
     const sale = { ...this.data.sale, dishIds: ids }
-    const dishes = applySelected(this.data.dishes, ids)
-    this.setData({ sale, dishes })
+    const oldMap = this.data.limitMap || {}
+    const limitMap = {}
+    for (const id of ids) {
+      limitMap[id] = oldMap[id] || ''
+    }
+    const dishes = applySelected(this.data.dishes, ids, limitMap)
+    this.setData({ sale, dishes, limitMap })
+  },
+
+  onLimitInput(e) {
+    const dishId = e.currentTarget.dataset.id
+    const value = String((e.detail && e.detail.value) || '')
+    const limitMap = { ...this.data.limitMap, [dishId]: value }
+    const dishes = this.data.dishes.map((d) => (d._id === dishId ? { ...d, limitQtyInput: value } : d))
+    this.setData({ limitMap, dishes })
+  },
+
+  buildDishConfigs() {
+    const dishIds = (this.data.sale && this.data.sale.dishIds) || []
+    const limitMap = this.data.limitMap || {}
+    const dishConfigs = []
+    for (const dishId of dishIds) {
+      const raw = String(limitMap[dishId] || '').trim()
+      if (!raw) return { ok: false, message: '请给每个菜填写总量' }
+      const n = Number(raw)
+      if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n) {
+        return { ok: false, message: '总量必须是非负整数' }
+      }
+      dishConfigs.push({ dishId, limitQty: Math.floor(n) })
+    }
+    if (dishConfigs.length === 0) return { ok: false, message: '请至少选择一个菜品' }
+    return { ok: true, dishConfigs }
   },
 
   async save() {
     const sale = this.data.sale
-    const label = String(sale.deliveryTimeSlotLabel || '').trim()
+    const label = String(this.recomputeSlotLabel() || '').trim()
     if (!label) {
       wx.showToast({ title: '请填写配送时间段', icon: 'none' })
       return
@@ -67,12 +169,21 @@ Page({
       wx.showToast({ title: '请至少选择一个菜品', icon: 'none' })
       return
     }
+    const cfgBuild = this.buildDishConfigs()
+    if (!cfgBuild.ok) {
+      wx.showToast({ title: cfgBuild.message, icon: 'none' })
+      return
+    }
     this.setData({ saving: true })
     const res = await call('admin', 'updateSaleDraft', {
       saleId: sale._id,
       deliveryTimeSlotLabel: label,
+      deliverySlotDate: this.data.slotDate || null,
+      deliverySlotStartTime: this.data.slotStart || null,
+      deliverySlotEndTime: this.data.slotEnd || null,
       note: String(sale.note || '').trim(),
       dishIds: sale.dishIds,
+      dishConfigs: cfgBuild.dishConfigs,
     })
     this.setData({ saving: false })
     if (!res.ok) {
@@ -84,8 +195,13 @@ Page({
   },
 
   async openSale() {
+    if (this.data.opening) return
+    if (this.data.openDisabled) {
+      wx.showToast({ title: '已有开单中开单，请先截单', icon: 'none' })
+      return
+    }
     const sale = this.data.sale
-    const label = String(sale.deliveryTimeSlotLabel || '').trim()
+    const label = String(this.recomputeSlotLabel() || '').trim()
     if (!label) {
       wx.showToast({ title: '请填写配送时间段', icon: 'none' })
       return
@@ -94,13 +210,22 @@ Page({
       wx.showToast({ title: '请至少选择一个菜品', icon: 'none' })
       return
     }
+    const cfgBuild = this.buildDishConfigs()
+    if (!cfgBuild.ok) {
+      wx.showToast({ title: cfgBuild.message, icon: 'none' })
+      return
+    }
     this.setData({ opening: true })
     // Ensure latest draft content is saved before opening.
     const saveRes = await call('admin', 'updateSaleDraft', {
       saleId: sale._id,
       deliveryTimeSlotLabel: label,
+      deliverySlotDate: this.data.slotDate || null,
+      deliverySlotStartTime: this.data.slotStart || null,
+      deliverySlotEndTime: this.data.slotEnd || null,
       note: String(sale.note || '').trim(),
       dishIds: sale.dishIds,
+      dishConfigs: cfgBuild.dishConfigs,
     })
     if (!saveRes.ok) {
       this.setData({ opening: false })

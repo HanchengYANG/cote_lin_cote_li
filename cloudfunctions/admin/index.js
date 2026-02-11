@@ -61,6 +61,77 @@ function asExcelHtml(title, rows) {
   )}</title></head><body><table border="1">${head}${body}</table></body></html>`
 }
 
+async function getTempUrlMap(fileIDs) {
+  const ids = Array.from(new Set((fileIDs || []).filter(Boolean)))
+  if (ids.length === 0) return new Map()
+  const r = await cloud.getTempFileURL({ fileList: ids })
+  const out = new Map()
+  for (const it of (r.fileList || [])) {
+    if (it && it.fileID && it.tempFileURL) out.set(it.fileID, it.tempFileURL)
+  }
+  return out
+}
+
+function stripMarkdownToPlain(md) {
+  let s = String(md || '')
+  // Drop images.
+  s = s.replace(/!\[[^\]]*?\]\([^)]+\)/g, '')
+  // Replace links with text + url.
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text, url) => `${text} (${url})`)
+  // Remove code fences and inline code markers.
+  s = s.replace(/```[\s\S]*?```/g, (m) => m.replace(/```/g, ''))
+  s = s.replace(/`([^`]+)`/g, '$1')
+  // Remove emphasis markers.
+  s = s.replace(/(\*\*|__)(.*?)\1/g, '$2')
+  s = s.replace(/(\*|_)(.*?)\1/g, '$2')
+  // Remove headings markers.
+  s = s.replace(/^#{1,6}\s+/gm, '')
+  // Collapse whitespace.
+  s = s.replace(/\s+/g, ' ').trim()
+  return s
+}
+
+function normalizeImageIds(input) {
+  return Array.isArray(input) ? input.filter(Boolean).map((x) => String(x).trim()).slice(0, 10) : []
+}
+
+function formatOrderAddress(a) {
+  if (!a) return ''
+  const parts = [a.line1, a.line2, a.postalCode, a.city, a.country].filter(Boolean)
+  return parts.join(' ')
+}
+
+function toSafeInt(v, fallback = 0) {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return fallback
+  return Math.floor(n)
+}
+
+function normalizeDishConfigs(input) {
+  if (!Array.isArray(input)) return []
+  const seen = new Set()
+  const out = []
+  for (const raw of input) {
+    const dishId = String((raw && raw.dishId) || '').trim()
+    if (!dishId || seen.has(dishId)) continue
+    const limitQty = toSafeInt(raw && raw.limitQty, NaN)
+    if (!Number.isFinite(limitQty) || limitQty < 0) continue
+    const soldRaw = toSafeInt(raw && raw.soldQty, 0)
+    const soldQty = Math.max(0, Math.min(limitQty, soldRaw))
+    out.push({ dishId, limitQty, soldQty })
+    seen.add(dishId)
+  }
+  return out
+}
+
+function dishConfigMap(dishConfigs) {
+  const m = new Map()
+  for (const cfg of normalizeDishConfigs(dishConfigs)) {
+    m.set(cfg.dishId, cfg)
+  }
+  return m
+}
+
 async function listSales(limit = 20) {
   const r = await db.collection('sales').orderBy('createdAt', 'desc').limit(limit).get()
   return r.data || []
@@ -99,7 +170,17 @@ exports.main = async (event) => {
 
   if (action === 'listDishes') {
     const r = await db.collection('dishes').orderBy('updatedAt', 'desc').limit(200).get()
-    return ok({ dishes: r.data || [] })
+    const dishes = (r.data || []).map((d) => ({
+      ...d,
+      images: normalizeImageIds(d.images),
+    }))
+    const firstIds = dishes.map((d) => d.images[0] || '').filter(Boolean)
+    const urlMap = await getTempUrlMap(firstIds)
+    const out = dishes.map((d) => ({
+      ...d,
+      thumbUrl: urlMap.get(d.images[0] || '') || '',
+    }))
+    return ok({ dishes: out })
   }
 
   if (action === 'getDish') {
@@ -107,7 +188,11 @@ exports.main = async (event) => {
     if (!dishId) return fail('BAD_REQUEST', 'Missing dishId')
     try {
       const r = await db.collection('dishes').doc(dishId).get()
-      return ok({ dish: r.data })
+      const dish = r.data
+      const imageIds = normalizeImageIds(dish.images)
+      const urlMap = await getTempUrlMap(imageIds)
+      const imageUrls = imageIds.map((id) => urlMap.get(id) || '')
+      return ok({ dish: { ...dish, images: imageIds, imageUrls } })
     } catch (err) {
       return fail('NOT_FOUND', 'Dish not found')
     }
@@ -116,21 +201,43 @@ exports.main = async (event) => {
   if (action === 'upsertDish') {
     const dishId = event.dishId
     const name = String(event.name || '').trim()
-    const priceFen = Number(event.priceFen || 0)
+    const priceCents = Number(event.priceCents || 0)
     const isActive = !!event.isActive
+    const images = normalizeImageIds(event.images)
+    const descMd = String(event.descMd || '')
+    const descPlain = stripMarkdownToPlain(descMd).slice(0, 120)
     if (!name) return fail('BAD_REQUEST', 'Missing name')
-    if (!Number.isFinite(priceFen) || priceFen <= 0) return fail('BAD_REQUEST', 'Invalid price')
+    if (!Number.isFinite(priceCents) || priceCents <= 0) return fail('BAD_REQUEST', 'Invalid price')
     const now = db.serverDate()
     if (dishId) {
+      let oldDish
+      try {
+        const oldRes = await db.collection('dishes').doc(dishId).get()
+        oldDish = oldRes.data
+      } catch (err) {
+        return fail('NOT_FOUND', 'Dish not found')
+      }
+      const oldImages = normalizeImageIds(oldDish && oldDish.images)
       await db.collection('dishes').doc(dishId).update({
-        data: { name, priceFen, isActive, updatedAt: now },
+        data: { name, priceCents, isActive, images, descMd, descPlain, updatedAt: now },
       })
-      return ok({ dishId })
+      const removedImageIds = oldImages.filter((id) => !images.includes(id))
+      let deletedImageCount = 0
+      let deleteError = null
+      if (removedImageIds.length > 0) {
+        try {
+          await cloud.deleteFile({ fileList: removedImageIds })
+          deletedImageCount = removedImageIds.length
+        } catch (err) {
+          deleteError = String((err && (err.errMsg || err.message)) || 'Delete file failed')
+        }
+      }
+      return ok({ dishId, removedImageCount: removedImageIds.length, deletedImageCount, deleteError })
     }
     const addRes = await db.collection('dishes').add({
-      data: { name, priceFen, isActive, createdAt: now, updatedAt: now },
+      data: { name, priceCents, isActive, images, descMd, descPlain, createdAt: now, updatedAt: now },
     })
-    return ok({ dishId: addRes._id })
+    return ok({ dishId: addRes._id, removedImageCount: 0, deletedImageCount: 0, deleteError: null })
   }
 
   if (action === 'toggleDishActive') {
@@ -165,6 +272,104 @@ exports.main = async (event) => {
     return ok({ activeSale, stats: { orderCount } })
   }
 
+  if (action === 'getActiveSaleEditor') {
+    const cfg = await getOrCreateAdminConfig()
+    const activeSaleId = String((cfg && cfg.activeSaleId) || '').trim()
+    if (!activeSaleId) return ok({ sale: null, dishes: [] })
+    let sale = null
+    try {
+      sale = await getSale(activeSaleId)
+    } catch (err) {
+      sale = null
+    }
+    if (!sale || sale.status !== 'OPEN') return ok({ sale: null, dishes: [] })
+    const r = await db.collection('dishes').orderBy('updatedAt', 'desc').limit(200).get()
+    const dishes = (r.data || []).map((d) => ({
+      ...d,
+      images: normalizeImageIds(d.images),
+    }))
+    const firstIds = dishes.map((d) => d.images[0] || '').filter(Boolean)
+    const urlMap = await getTempUrlMap(firstIds)
+    const out = dishes.map((d) => ({
+      ...d,
+      thumbUrl: urlMap.get(d.images[0] || '') || '',
+    }))
+    return ok({ sale: { ...sale, dishConfigs: normalizeDishConfigs(sale.dishConfigs) }, dishes: out })
+  }
+
+  if (action === 'updateActiveSaleConfig') {
+    const cfg = await getOrCreateAdminConfig()
+    const saleId = String(event.saleId || cfg.activeSaleId || '').trim()
+    if (!saleId) return fail('BAD_REQUEST', 'Missing saleId')
+    let sale = null
+    try {
+      sale = await getSale(saleId)
+    } catch (err) {
+      sale = null
+    }
+    if (!sale || sale.status !== 'OPEN') return fail('BAD_REQUEST', 'Sale is not open')
+
+    const deliverySlotDate = event.deliverySlotDate ? String(event.deliverySlotDate).trim() : ''
+    const deliverySlotStartTime = event.deliverySlotStartTime ? String(event.deliverySlotStartTime).trim() : ''
+    const deliverySlotEndTime = event.deliverySlotEndTime ? String(event.deliverySlotEndTime).trim() : ''
+    const note = String(event.note || '').trim()
+    const incomingConfigs = normalizeDishConfigs(event.dishConfigs)
+    if (incomingConfigs.length === 0) return fail('BAD_REQUEST', 'Missing dishConfigs')
+    if (!(deliverySlotDate && deliverySlotStartTime && deliverySlotEndTime)) {
+      return fail('BAD_REQUEST', 'Missing structured slot fields')
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(deliverySlotDate)) return fail('BAD_REQUEST', 'Invalid slot date')
+    if (!/^\d{2}:\d{2}$/.test(deliverySlotStartTime)) return fail('BAD_REQUEST', 'Invalid slot start time')
+    if (!/^\d{2}:\d{2}$/.test(deliverySlotEndTime)) return fail('BAD_REQUEST', 'Invalid slot end time')
+    if (deliverySlotStartTime >= deliverySlotEndTime) return fail('BAD_REQUEST', 'Invalid slot time range')
+
+    const oldConfigs = normalizeDishConfigs(sale.dishConfigs)
+    const oldMap = dishConfigMap(oldConfigs)
+    const incomingSet = new Set(incomingConfigs.map((x) => x.dishId))
+    for (const old of oldConfigs) {
+      if (!incomingSet.has(old.dishId)) {
+        return fail('BAD_REQUEST', 'Cannot remove existing dish in OPEN sale')
+      }
+    }
+
+    const allDishIds = incomingConfigs.map((x) => x.dishId)
+    const dishList = await getDishesByIds(allDishIds)
+    if (dishList.length !== allDishIds.length) return fail('BAD_REQUEST', 'Dish not found')
+    const dishMap = new Map((dishList || []).map((d) => [d._id, d]))
+
+    const nextConfigs = []
+    const addedDishIds = []
+    for (const cfgItem of incomingConfigs) {
+      const old = oldMap.get(cfgItem.dishId) || null
+      const dish = dishMap.get(cfgItem.dishId)
+      if (!dish) return fail('BAD_REQUEST', 'Dish not found')
+      if (!old && !dish.isActive) return fail('BAD_REQUEST', 'New dish must be active')
+      const soldQty = old ? toSafeInt(old.soldQty, 0) : 0
+      if (cfgItem.limitQty < soldQty) {
+        return fail('BAD_REQUEST', `limitQty too low for dish ${cfgItem.dishId}`)
+      }
+      if (!old) addedDishIds.push(cfgItem.dishId)
+      nextConfigs.push({ dishId: cfgItem.dishId, limitQty: cfgItem.limitQty, soldQty })
+    }
+
+    const deliveryTimeSlotLabel = `${deliverySlotDate} ${deliverySlotStartTime}-${deliverySlotEndTime}`
+    const nextVersion = Math.max(1, toSafeInt(sale.saleConfigVersion, 0) + 1)
+    await db.collection('sales').doc(saleId).update({
+      data: {
+        deliveryTimeSlotLabel,
+        deliverySlotDate,
+        deliverySlotStartTime,
+        deliverySlotEndTime,
+        note,
+        dishIds: nextConfigs.map((x) => x.dishId),
+        dishConfigs: nextConfigs,
+        saleConfigVersion: nextVersion,
+        updatedAt: db.serverDate(),
+      },
+    })
+    return ok({ saleId, addedDishIds, saleConfigVersion: nextVersion })
+  }
+
   if (action === 'getOrCreateDraft') {
     const sales = await listSales(50)
     const draft = (sales || []).find((s) => s.status === 'DRAFT')
@@ -174,8 +379,13 @@ exports.main = async (event) => {
       data: {
         status: 'DRAFT',
         dishIds: [],
+        dishConfigs: [],
         note: '',
         deliveryTimeSlotLabel: '',
+        deliverySlotDate: null,
+        deliverySlotStartTime: null,
+        deliverySlotEndTime: null,
+        saleConfigVersion: 0,
         createdAt: now,
         updatedAt: now,
       },
@@ -189,16 +399,35 @@ exports.main = async (event) => {
     if (!saleId) return fail('BAD_REQUEST', 'Missing saleId')
     const sale = await getSale(saleId)
     if (!sale || sale.status !== 'DRAFT') return fail('BAD_REQUEST', 'Sale is not draft')
-    const deliveryTimeSlotLabel = String(event.deliveryTimeSlotLabel || '').trim()
+    const deliverySlotDate = event.deliverySlotDate ? String(event.deliverySlotDate).trim() : ''
+    const deliverySlotStartTime = event.deliverySlotStartTime ? String(event.deliverySlotStartTime).trim() : ''
+    const deliverySlotEndTime = event.deliverySlotEndTime ? String(event.deliverySlotEndTime).trim() : ''
     const note = String(event.note || '').trim()
-    const dishIds = Array.isArray(event.dishIds) ? event.dishIds.filter(Boolean) : []
-    if (!deliveryTimeSlotLabel) return fail('BAD_REQUEST', 'Missing deliveryTimeSlotLabel')
-    if (dishIds.length === 0) return fail('BAD_REQUEST', 'Missing dishIds')
+    const incomingConfigs = normalizeDishConfigs(event.dishConfigs)
+    if (incomingConfigs.length === 0) return fail('BAD_REQUEST', 'Missing dishConfigs')
+    const dishIds = incomingConfigs.map((x) => x.dishId)
+    const dishList = await getDishesByIds(dishIds)
+    if (dishList.length !== dishIds.length) return fail('BAD_REQUEST', 'Dish not found')
+    const activeSet = new Set((dishList || []).filter((d) => d && d.isActive).map((d) => d._id))
+    if (activeSet.size !== dishIds.length) return fail('BAD_REQUEST', 'Contains inactive dish')
+    if (!(deliverySlotDate && deliverySlotStartTime && deliverySlotEndTime)) {
+      return fail('BAD_REQUEST', 'Missing structured slot fields')
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(deliverySlotDate)) return fail('BAD_REQUEST', 'Invalid slot date')
+    if (!/^\d{2}:\d{2}$/.test(deliverySlotStartTime)) return fail('BAD_REQUEST', 'Invalid slot start time')
+    if (!/^\d{2}:\d{2}$/.test(deliverySlotEndTime)) return fail('BAD_REQUEST', 'Invalid slot end time')
+    if (deliverySlotStartTime >= deliverySlotEndTime) return fail('BAD_REQUEST', 'Invalid slot time range')
+    const deliveryTimeSlotLabel = `${deliverySlotDate} ${deliverySlotStartTime}-${deliverySlotEndTime}`
     await db.collection('sales').doc(saleId).update({
       data: {
         deliveryTimeSlotLabel,
+        deliverySlotDate,
+        deliverySlotStartTime,
+        deliverySlotEndTime,
         note,
         dishIds,
+        dishConfigs: incomingConfigs.map((x) => ({ dishId: x.dishId, limitQty: x.limitQty, soldQty: 0 })),
+        saleConfigVersion: 0,
         updatedAt: db.serverDate(),
       },
     })
@@ -211,10 +440,21 @@ exports.main = async (event) => {
     const sale = await getSale(saleId)
     if (!sale || sale.status !== 'DRAFT') return fail('BAD_REQUEST', 'Sale is not draft')
     if (!String(sale.deliveryTimeSlotLabel || '').trim()) return fail('BAD_REQUEST', 'Missing deliveryTimeSlotLabel')
+    if (!(sale.deliverySlotDate && sale.deliverySlotStartTime && sale.deliverySlotEndTime)) {
+      return fail('BAD_REQUEST', 'Missing structured slot fields')
+    }
     if (!sale.dishIds || sale.dishIds.length === 0) return fail('BAD_REQUEST', 'Missing dishIds')
+    const draftConfigs = normalizeDishConfigs(sale.dishConfigs)
+    if (draftConfigs.length === 0) return fail('BAD_REQUEST', 'Missing dishConfigs')
+    const draftSet = new Set(draftConfigs.map((x) => x.dishId))
+    const saleSet = new Set((sale.dishIds || []).filter(Boolean))
+    if (draftSet.size !== saleSet.size) return fail('BAD_REQUEST', 'dishIds and dishConfigs mismatch')
+    for (const dishId of saleSet) {
+      if (!draftSet.has(dishId)) return fail('BAD_REQUEST', 'dishIds and dishConfigs mismatch')
+    }
 
     try {
-      await db.runTransaction(async (tx) => {
+      const txRes = await db.runTransaction(async (tx) => {
         const cfgRef = tx.collection('adminConfig').doc('main')
         let cfg
         try {
@@ -227,14 +467,45 @@ exports.main = async (event) => {
           const cfgGet2 = await cfgRef.get()
           cfg = cfgGet2.data
         }
-        if (cfg.activeSaleId) throw Object.assign(new Error('ACTIVE_SALE_EXISTS'), { code: 'ACTIVE_SALE_EXISTS' })
+        if (cfg.activeSaleId) {
+          let cfgActiveSale = null
+          try {
+            const cfgActiveSaleGet = await tx.collection('sales').doc(cfg.activeSaleId).get()
+            cfgActiveSale = cfgActiveSaleGet.data
+          } catch (err) {
+            cfgActiveSale = null
+          }
+          if (cfgActiveSale && cfgActiveSale.status === 'OPEN') {
+            return { blocked: true, activeSaleId: cfg.activeSaleId }
+          }
+          // Heal stale activeSaleId so opening logic only blocks real OPEN sales.
+          await cfgRef.update({ data: { activeSaleId: null, updatedAt: db.serverDate() } })
+        }
+
+        // Safety net: if config is missing activeSaleId but there is an OPEN sale, block opening.
+        const openSales = await tx.collection('sales').where({ status: 'OPEN' }).limit(1).get()
+        const existingOpen = (openSales.data && openSales.data[0]) || null
+        if (existingOpen && existingOpen._id) {
+          // Heal config so later reads are consistent.
+          await cfgRef.update({ data: { activeSaleId: existingOpen._id, updatedAt: db.serverDate() } })
+          return { blocked: true, activeSaleId: existingOpen._id }
+        }
+
         await cfgRef.update({ data: { activeSaleId: saleId, updatedAt: db.serverDate() } })
         await tx.collection('sales').doc(saleId).update({
-          data: { status: 'OPEN', openedAt: db.serverDate(), updatedAt: db.serverDate() },
+          data: {
+            status: 'OPEN',
+            dishIds: draftConfigs.map((x) => x.dishId),
+            dishConfigs: draftConfigs.map((x) => ({ dishId: x.dishId, limitQty: x.limitQty, soldQty: 0 })),
+            saleConfigVersion: 1,
+            openedAt: db.serverDate(),
+            updatedAt: db.serverDate(),
+          },
         })
+        return { blocked: false }
       })
+      if (txRes && txRes.blocked) return fail('ACTIVE_SALE_EXISTS', '已有开单中开单，请先截单', { activeSaleId: txRes.activeSaleId })
     } catch (err) {
-      if (err && err.code === 'ACTIVE_SALE_EXISTS') return fail('ACTIVE_SALE_EXISTS', '已有开单中开单，请先截单')
       return fail('TX_FAILED', 'Open sale failed', String(err && err.message))
     }
     return ok({})
@@ -286,19 +557,60 @@ exports.main = async (event) => {
   if (action === 'cancelOrder') {
     const { orderId } = event
     if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
-    let order
+    let txRes
     try {
-      const r = await db.collection('orders').doc(orderId).get()
-      order = r.data
+      txRes = await db.runTransaction(async (tx) => {
+        let order = null
+        try {
+          const r = await tx.collection('orders').doc(orderId).get()
+          order = r.data
+        } catch (err) {
+          throw Object.assign(new Error('ORDER_NOT_FOUND'), { code: 'ORDER_NOT_FOUND' })
+        }
+        if (!order) throw Object.assign(new Error('ORDER_NOT_FOUND'), { code: 'ORDER_NOT_FOUND' })
+        if (order.status === 'CANCELLED') return { alreadyCancelled: true }
+
+        const now = db.serverDate()
+        await tx.collection('orders').doc(orderId).update({
+          data: { status: 'CANCELLED', cancelledAt: now, cancelledByOpenId: openId, updatedAt: now },
+        })
+
+        if (order.saleId) {
+          let sale = null
+          try {
+            const saleGet = await tx.collection('sales').doc(order.saleId).get()
+            sale = saleGet.data
+          } catch (err) {
+            sale = null
+          }
+          if (sale && Array.isArray(sale.dishConfigs)) {
+            const cfgMap = dishConfigMap(sale.dishConfigs)
+            for (const it of (order.items || [])) {
+              const dishId = String((it && it.dishId) || '').trim()
+              const qty = toSafeInt(it && it.qty, 0)
+              if (!dishId || qty <= 0) continue
+              const cfgItem = cfgMap.get(dishId)
+              if (!cfgItem) continue
+              cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) - qty)
+              cfgMap.set(dishId, cfgItem)
+            }
+            const mergedConfigs = (sale.dishConfigs || []).map((it) => {
+              const cfgItem = cfgMap.get(it.dishId)
+              return cfgItem || it
+            })
+            await tx.collection('sales').doc(order.saleId).update({
+              data: { dishConfigs: mergedConfigs, updatedAt: db.serverDate() },
+            })
+          }
+        }
+        return { alreadyCancelled: false }
+      })
     } catch (err) {
-      return fail('ORDER_NOT_FOUND', 'Order not found')
+      if (err && err.code === 'ORDER_NOT_FOUND') return fail('ORDER_NOT_FOUND', 'Order not found')
+      return fail('TX_FAILED', 'Cancel order failed', String(err && err.message))
     }
-    if (!order) return fail('ORDER_NOT_FOUND', 'Order not found')
-    if (order.status === 'CANCELLED') return ok({})
+    if (txRes && txRes.alreadyCancelled) return ok({})
     const now = db.serverDate()
-    await db.collection('orders').doc(orderId).update({
-      data: { status: 'CANCELLED', cancelledAt: now, cancelledByOpenId: openId, updatedAt: now },
-    })
     await db.collection('orderAuditLogs').add({
       data: { orderId, action: 'CANCEL', byOpenId: openId, at: now },
     })
@@ -339,40 +651,43 @@ exports.main = async (event) => {
         '类型',
         '时间段',
         '电话',
-        '省',
-        '市',
-        '区',
-        '详细地址',
-        '补充',
+        '地址行1',
+        '地址行2',
+        '邮编',
+        '城市',
+        '国家',
         '备注',
         '付款方式',
         '收款状态',
         '订单状态',
         '菜品明细',
         '总件数',
-        '总金额(分)',
+        '总金额(cents)',
+        '总金额(EUR)',
       ]
       const rows = orders.map((o) => {
         const a = o.address || {}
         const itemText = (o.items || []).map((it) => `${it.dishName} x${it.qty}`).join('; ')
+        const amountCents = (o.totals && o.totals.amountCents) || 0
         return [
           o._id,
           o.createdAt ? String(o.createdAt) : '',
           o.fulfillmentType,
           o.deliveryTimeSlotLabelSnapshot || '',
           (o.contact && o.contact.phone) || '',
-          a.province || '',
+          a.line1 || '',
+          a.line2 || '',
+          a.postalCode || '',
           a.city || '',
-          a.district || '',
-          a.detail || '',
-          a.extra || '',
+          a.country || '',
           o.remark || '',
           (o.payment && o.payment.method) || '',
           (o.payment && o.payment.paidStatus) || '',
           o.status || '',
           itemText,
           (o.totals && o.totals.qty) || 0,
-          (o.totals && o.totals.amountFen) || 0,
+          amountCents,
+          (Number(amountCents) / 100).toFixed(2),
         ]
       })
       table = { headers, rows }
@@ -393,8 +708,7 @@ exports.main = async (event) => {
     } else if (exportType === 'CUSTOMER_ADDRESS') {
       const headers = ['订单号', '类型', '时间段', '电话', '地址', '备注', '菜品明细']
       const rows = orders.map((o) => {
-        const a = o.address || {}
-        const addr = [a.province, a.city, a.district, a.detail, a.extra].filter(Boolean).join('')
+        const addr = formatOrderAddress(o.address)
         const itemText = (o.items || []).map((it) => `${it.dishName} x${it.qty}`).join('; ')
         return [
           o._id,

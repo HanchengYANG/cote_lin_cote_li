@@ -1,28 +1,45 @@
 const { call } = require('../../utils/api')
-const { fenToYuan } = require('../../utils/format')
+const { centToEuro } = require('../../utils/format')
 
 const PAYMENT_METHODS = [
   { label: '现金', value: 'cash' },
   { label: '微信转账', value: 'wechat_transfer' },
   { label: '到店付款', value: 'pickup_pay' },
 ]
-const PAID_STATUS = [
-  { label: '未收款', value: 'UNPAID' },
-  { label: '已收款', value: 'PAID' },
-]
+
+function normalizePhone(phone) {
+  return String(phone || '')
+    .trim()
+    .replace(/[.\-\s]/g, '')
+}
 
 function isPhoneValid(phone) {
-  const s = String(phone || '').trim()
+  const s = normalizePhone(phone)
   return /^(\+?\d{6,20})$/.test(s)
 }
 
 function isAddressValid(addr) {
   if (!addr) return false
-  const need = ['province', 'city', 'district', 'detail']
-  for (const k of need) {
-    if (!String(addr[k] || '').trim()) return false
-  }
-  return true
+  const line1 = String(addr.line1 || '').trim()
+  const postalCode = String(addr.postalCode || '').trim()
+  const city = String(addr.city || '').trim()
+  return !!(line1 && city && /^\d{5}$/.test(postalCode))
+}
+
+function findPaymentMethodIndex(value) {
+  const idx = PAYMENT_METHODS.findIndex((x) => x.value === value)
+  return idx >= 0 ? idx : 0
+}
+
+function outOfStockMessage(detail) {
+  const list = detail && Array.isArray(detail.items) ? detail.items : []
+  if (list.length === 0) return '库存不足，请返回菜单调整'
+  const first = list[0]
+  const name = String((first && first.dishName) || '')
+  const remain = Number(first && first.remainingQty)
+  if (name && Number.isFinite(remain)) return `${name} 库存不足（剩余 ${Math.max(0, remain)}）`
+  if (name) return `${name} 库存不足`
+  return '库存不足，请返回菜单调整'
 }
 
 Page({
@@ -31,19 +48,19 @@ Page({
     saleId: '',
     cartItems: [],
     lines: [],
-    totalAmountYuan: '0.00',
+    totalAmountEuro: '0.00',
+    hasExistingOrder: false,
 
     fulfillmentType: 'delivery',
     phone: '',
-    address: { province: '', city: '', district: '', detail: '', extra: '' },
+    address: { line1: '', line2: '', postalCode: '', city: '', country: 'FR' },
     acceptDeliverySlot: false,
+    addrSuggestions: [],
+    suggesting: false,
 
     paymentMethodLabels: PAYMENT_METHODS,
     paymentMethodIndex: 0,
     paymentMethodLabel: PAYMENT_METHODS[0].label,
-    paidStatusLabels: PAID_STATUS,
-    paidStatusIndex: 0,
-    paidStatusLabel: PAID_STATUS[0].label,
 
     remark: '',
     submitting: false,
@@ -67,7 +84,7 @@ Page({
   async reload() {
     const res = await call('customer', 'getCurrentSale')
     if (!res.ok || !res.data || !res.data.sale) {
-      this.setData({ sale: null, lines: [], totalAmountYuan: '0.00' })
+      this.setData({ sale: null, lines: [], totalAmountEuro: '0.00' })
       this.recomputeSubmitDisabled()
       return
     }
@@ -81,34 +98,63 @@ Page({
     }
     const dishesById = {}
     for (const d of res.data.dishes || []) dishesById[d._id] = d
-    this.setData({ sale, dishesById })
+    let existingOrder = null
+    const orderRes = await call('customer', 'getMySaleOrder', { saleId: sale._id })
+    if (orderRes.ok && orderRes.data && orderRes.data.order) existingOrder = orderRes.data.order
+
+    const next = {
+      sale,
+      dishesById,
+      hasExistingOrder: !!existingOrder,
+    }
+    if (existingOrder) {
+      const method = String((existingOrder.payment && existingOrder.payment.method) || 'cash')
+      const methodIdx = findPaymentMethodIndex(method)
+      next.fulfillmentType = existingOrder.fulfillmentType || 'delivery'
+      next.phone = String((existingOrder.contact && existingOrder.contact.phone) || '')
+      next.address =
+        existingOrder.fulfillmentType === 'delivery' && existingOrder.address
+          ? {
+              line1: String(existingOrder.address.line1 || ''),
+              line2: String(existingOrder.address.line2 || ''),
+              postalCode: String(existingOrder.address.postalCode || ''),
+              city: String(existingOrder.address.city || ''),
+              country: 'FR',
+            }
+          : { line1: '', line2: '', postalCode: '', city: '', country: 'FR' }
+      next.acceptDeliverySlot = existingOrder.fulfillmentType === 'delivery'
+      next.paymentMethodIndex = methodIdx
+      next.paymentMethodLabel = PAYMENT_METHODS[methodIdx].label
+      next.remark = String(existingOrder.remark || '')
+    }
+    this.setData(next)
     this.recomputeSubmitDisabled()
   },
 
   recalcLines() {
     const dishesById = this.data.dishesById || {}
     const lines = []
-    let totalFen = 0
+    let totalCents = 0
     for (const it of this.data.cartItems) {
       const dish = dishesById[it.dishId]
       if (!dish) continue
       const qty = Number(it.qty || 0)
       if (qty <= 0) continue
-      const unitPriceFen = Number(dish.priceFen || 0)
-      const lineTotalFen = unitPriceFen * qty
-      totalFen += lineTotalFen
+      const unitPriceCents = Number(dish.priceCents || 0)
+      const lineTotalCents = unitPriceCents * qty
+      totalCents += lineTotalCents
       lines.push({
         dishId: it.dishId,
         name: dish.name,
         qty,
-        unitPriceFen,
-        unitPriceYuan: fenToYuan(unitPriceFen),
-        lineTotalYuan: fenToYuan(lineTotalFen),
+        unitPriceCents,
+        unitPriceEuro: centToEuro(unitPriceCents),
+        lineTotalEuro: centToEuro(lineTotalCents),
       })
     }
     this.setData({
       lines,
-      totalAmountYuan: fenToYuan(totalFen),
+      totalAmountEuro: centToEuro(totalCents),
     })
   },
 
@@ -134,6 +180,51 @@ Page({
     this.recomputeSubmitDisabled()
   },
 
+  onLine1Input(e) {
+    const address = { ...this.data.address, line1: e.detail.value }
+    this.setData({ address })
+    this.recomputeSubmitDisabled()
+    this.debouncedSuggest(address.line1)
+  },
+
+  debouncedSuggest(q) {
+    const s = String(q || '').trim()
+    if (this._suggestTimer) clearTimeout(this._suggestTimer)
+    if (s.length < 3) {
+      this.setData({ addrSuggestions: [] })
+      return
+    }
+    this._suggestTimer = setTimeout(() => {
+      this.fetchSuggestions(s)
+    }, 300)
+  },
+
+  async fetchSuggestions(q) {
+    this.setData({ suggesting: true })
+    const res = await call('customer', 'suggestAddress', { q, limit: 5 })
+    this.setData({ suggesting: false })
+    if (!res.ok) {
+      this.setData({ addrSuggestions: [] })
+      return
+    }
+    this.setData({ addrSuggestions: res.data.suggestions || [] })
+  },
+
+  pickSuggestion(e) {
+    const i = Number(e.currentTarget.dataset.i)
+    const s = (this.data.addrSuggestions || [])[i]
+    if (!s) return
+    const address = {
+      ...this.data.address,
+      line1: s.line1 || s.label || '',
+      postalCode: s.postalCode || '',
+      city: s.city || '',
+      country: 'FR',
+    }
+    this.setData({ address, addrSuggestions: [] })
+    this.recomputeSubmitDisabled()
+  },
+
   onAcceptChange(e) {
     const arr = (e && e.detail && e.detail.value) || []
     const accept = Array.isArray(arr) ? arr.includes('accept') : false
@@ -145,12 +236,6 @@ Page({
     const idx = Number(e.detail.value || 0)
     const label = (PAYMENT_METHODS[idx] && PAYMENT_METHODS[idx].label) || PAYMENT_METHODS[0].label
     this.setData({ paymentMethodIndex: idx, paymentMethodLabel: label })
-  },
-
-  onPaidStatusPick(e) {
-    const idx = Number(e.detail.value || 0)
-    const label = (PAID_STATUS[idx] && PAID_STATUS[idx].label) || PAID_STATUS[0].label
-    this.setData({ paidStatusIndex: idx, paidStatusLabel: label })
   },
 
   onRemarkInput(e) {
@@ -172,7 +257,7 @@ Page({
     if (this.data.fulfillmentType === 'delivery') {
       if (!disabled && !isAddressValid(this.data.address)) {
         disabled = true
-        reason = '请完整填写配送地址（省/市/区/详细地址）'
+        reason = '请填写法国地址（line1 / postal code / city）'
       }
       if (!disabled && !this.data.acceptDeliverySlot) {
         disabled = true
@@ -187,21 +272,26 @@ Page({
     this.setData({ submitting: true })
     this.recomputeSubmitDisabled()
     const paymentMethod = PAYMENT_METHODS[this.data.paymentMethodIndex].value
-    const paidStatus = PAID_STATUS[this.data.paidStatusIndex].value
     const payload = {
       saleId: this.data.saleId,
       fulfillmentType: this.data.fulfillmentType,
-      phone: String(this.data.phone || '').trim(),
+      phone: normalizePhone(this.data.phone),
       address: this.data.fulfillmentType === 'delivery' ? this.data.address : null,
       acceptDeliverySlot: this.data.fulfillmentType === 'delivery' ? !!this.data.acceptDeliverySlot : false,
       items: this.data.cartItems,
-      payment: { method: paymentMethod, paidStatus },
+      payment: { method: paymentMethod },
       remark: String(this.data.remark || '').trim(),
     }
     const res = await call('customer', 'createOrder', payload)
     this.setData({ submitting: false })
     this.recomputeSubmitDisabled()
     if (!res.ok) {
+      if (res.code === 'OUT_OF_STOCK') {
+        wx.showToast({ title: outOfStockMessage(res.detail), icon: 'none' })
+        await this.reload()
+        this.recalcLines()
+        return
+      }
       wx.showToast({ title: res.message || '下单失败', icon: 'none' })
       return
     }

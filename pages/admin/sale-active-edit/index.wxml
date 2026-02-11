@@ -1,0 +1,66 @@
+<navigation-bar title="编辑本次开单" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="page">
+    <view class="card" wx:if="{{!sale}}">
+      <view class="muted">暂无开单中</view>
+      <view class="muted small">请先开单再编辑</view>
+    </view>
+
+    <view wx:else>
+      <view class="card">
+        <view class="title">配送时间段</view>
+        <picker mode="date" value="{{slotDate}}" bindchange="onPickDate">
+          <view class="picker">日期：{{slotDate || '请选择'}}</view>
+        </picker>
+        <picker mode="time" value="{{slotStart}}" bindchange="onPickStart">
+          <view class="picker">开始：{{slotStart || '请选择'}}</view>
+        </picker>
+        <picker mode="time" value="{{slotEnd}}" bindchange="onPickEnd">
+          <view class="picker">结束：{{slotEnd || '请选择'}}</view>
+        </picker>
+        <view class="muted small">展示文案：{{slotLabel}}</view>
+      </view>
+
+      <view class="card">
+        <view class="title">说明文案</view>
+        <textarea class="textarea" placeholder="展示在菜单页顶部" value="{{note}}" bindinput="onNoteInput"></textarea>
+      </view>
+
+      <view class="card">
+        <view class="title">本次菜品总量</view>
+        <view class="muted small">规则：可新增，不可移除。可将总量调到已售量实现“立即售罄”。</view>
+        <view class="dish-row" wx:for="{{dishConfigs}}" wx:key="dishId">
+          <view class="dish-main">
+            <view class="dish-name">{{item.name}}</view>
+            <view class="muted small">€{{item.priceEuro}} · 已售 {{item.soldQty}} · 剩余 {{item.remainingQty}}</view>
+            <view class="muted small" wx:if="{{!item.isActive}}">该菜在菜品库已下架（但本次开单仍保留）</view>
+          </view>
+          <input
+            class="qty-input"
+            type="number"
+            placeholder="总量"
+            value="{{item.limitQtyInput}}"
+            data-id="{{item.dishId}}"
+            bindinput="onLimitInput"
+          />
+          <button class="mini-btn ghost" size="mini" data-id="{{item.dishId}}" bindtap="markSoldOut">售罄</button>
+        </view>
+      </view>
+
+      <view class="card" wx:if="{{addDishOptions.length>0}}">
+        <view class="title">新增菜品到本次开单</view>
+        <picker mode="selector" range="{{addDishOptions}}" range-key="label" value="{{addDishIndex}}" bindchange="onAddDishPick">
+          <view class="picker">菜品：{{addDishOptions[addDishIndex].label}}</view>
+        </picker>
+        <input class="qty-input full" type="number" placeholder="该菜总量（必填）" value="{{addLimitQty}}" bindinput="onAddLimitInput" />
+        <button class="btn ghost" bindtap="addDish">新增到本次开单</button>
+      </view>
+      <view class="card" wx:else>
+        <view class="muted small">没有可新增的上架菜品。</view>
+      </view>
+
+      <button class="btn" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存本次开单</button>
+    </view>
+  </view>
+</scroll-view>
+

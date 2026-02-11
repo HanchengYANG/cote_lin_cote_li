@@ -1,6 +1,7 @@
 {
   "pages": [
     "pages/index/index",
+    "pages/dish-detail/index",
     "pages/checkout/index",
     "pages/order-success/index",
     "pages/my-orders/index",
@@ -9,6 +10,7 @@
     "pages/admin/dishes/index",
     "pages/admin/dish-edit/index",
     "pages/admin/sale-draft/index",
+    "pages/admin/sale-active-edit/index",
     "pages/admin/orders/index",
     "pages/admin/order-detail/index",
     "pages/admin/export/index"
@@ -23,7 +25,6 @@
     "skyline": {
       "defaultDisplayBlock": true,
       "defaultContentBox": true,
-      "tagNameStyleIsolation": "legacy",
       "disableABTest": true,
       "sdkVersionBegin": "3.0.0",
       "sdkVersionEnd": "15.255.255"

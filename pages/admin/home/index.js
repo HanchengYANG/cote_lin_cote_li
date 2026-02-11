@@ -1,5 +1,6 @@
 const { call } = require('../../../utils/api')
 const { formatTime } = require('../../../utils/format')
+const { getSession } = require('../../../utils/session')
 
 Page({
   data: {
@@ -15,12 +16,9 @@ Page({
   },
 
   async reload() {
-    const [authRes, openIdRes] = await Promise.all([
-      call('auth', 'isAdmin'),
-      call('auth', 'getMyOpenId'),
-    ])
-    const isAdmin = !!(authRes.ok && authRes.data && authRes.data.isAdmin)
-    const myOpenId = (openIdRes.ok && openIdRes.data && openIdRes.data.openId) || ''
+    const sess = await getSession()
+    const isAdmin = !!sess.isAdmin
+    const myOpenId = sess.openId || ''
     this.setData({ isAdmin, myOpenId })
     if (!isAdmin) {
       this.setData({ activeSale: null, stats: { orderCount: 0 }, sales: [] })
@@ -60,6 +58,10 @@ Page({
 
   goOrders() {
     wx.navigateTo({ url: '/pages/admin/orders/index' })
+  },
+
+  goActiveSaleEdit() {
+    wx.navigateTo({ url: '/pages/admin/sale-active-edit/index' })
   },
 
   goExport() {
