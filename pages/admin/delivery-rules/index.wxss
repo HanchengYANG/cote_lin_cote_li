@@ -1,0 +1,116 @@
+page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f6f7fb;
+}
+.scrollarea {
+  flex: 1;
+  overflow-y: hidden;
+}
+.page {
+  padding: 24rpx;
+}
+.card {
+  background: #fff;
+  border-radius: 20rpx;
+  padding: 22rpx;
+  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.06);
+  margin-bottom: 18rpx;
+}
+.title {
+  font-size: 32rpx;
+  font-weight: 700;
+  margin-bottom: 14rpx;
+}
+.muted {
+  color: rgba(0, 0, 0, 0.55);
+}
+.small {
+  font-size: 24rpx;
+}
+.input {
+  border: 1rpx solid rgba(0, 0, 0, 0.12);
+  border-radius: 14rpx;
+  height: 72rpx;
+  line-height: 72rpx;
+  padding: 0 16rpx;
+  font-size: 28rpx;
+  box-sizing: border-box;
+  background: #fff;
+}
+.rule-item {
+  margin-bottom: 12rpx;
+}
+.rule-row {
+  display: flex;
+  gap: 0;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+}
+.city-wrap {
+  flex: 0 0 52%;
+  min-width: 0;
+  padding-right: 8rpx;
+  box-sizing: border-box;
+}
+.price-wrap {
+  flex: 0 0 24%;
+  min-width: 0;
+  padding-right: 8rpx;
+  box-sizing: border-box;
+}
+.delete-wrap {
+  flex: 0 0 24%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.city,
+.price {
+  width: 100%;
+}
+.btn {
+  background: #111;
+  color: #fff;
+  border-radius: 18rpx;
+  height: 84rpx;
+  line-height: 84rpx;
+}
+.btn.ghost {
+  background: transparent;
+  color: #111;
+  border: 1rpx solid rgba(0, 0, 0, 0.18);
+}
+.btn.mini {
+  height: 64rpx;
+  line-height: 64rpx;
+  border-radius: 12rpx;
+  font-size: 24rpx;
+}
+.btn.delete-btn {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  background: #d93025;
+  color: #fff;
+  border: 1rpx solid #b3261e;
+}
+.btn.delete-btn::after {
+  border: none;
+}
+.sug {
+  margin-top: 8rpx;
+  border: 1rpx solid rgba(0, 0, 0, 0.1);
+  border-radius: 14rpx;
+  overflow: hidden;
+}
+.sug-item {
+  padding: 14rpx 16rpx;
+  border-top: 1rpx solid rgba(0, 0, 0, 0.06);
+}
+.sug-item:first-child {
+  border-top: none;
+}

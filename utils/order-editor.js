@@ -9,7 +9,10 @@ function formatAddress(addr) {
 
 function decorateOrder(order) {
   if (!order) return null
-  const statusText = order.status === 'CANCELLED' ? '已取消' : '有效'
+  let statusText = '有效'
+  if (order.status === 'CANCELLED') statusText = '已取消'
+  if (order.status === 'PENDING_REVIEW') statusText = '待确认'
+  if (order.status === 'REJECTED') statusText = '已拒绝'
   const fulfillmentText = order.fulfillmentType === 'pickup' ? '自取' : '配送'
   const items = (order.items || []).map((it) => ({
     ...it,

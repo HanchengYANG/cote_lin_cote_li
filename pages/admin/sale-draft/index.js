@@ -21,6 +21,8 @@ Page({
     slotLabel: '',
     activeSale: null,
     openDisabled: false,
+    pendingOrders: [],
+    pendingSelectedIds: [],
     saving: false,
     opening: false,
   },
@@ -30,9 +32,10 @@ Page({
   },
 
   async reload() {
-    const [saleRes, dishesRes] = await Promise.all([
+    const [saleRes, dishesRes, pendingRes] = await Promise.all([
       call('admin', 'getOrCreateDraft'),
       call('admin', 'listDishes'),
+      call('admin', 'listPendingOrders'),
     ])
     if (!saleRes.ok) {
       wx.showToast({ title: saleRes.message || '加载失败', icon: 'none' })
@@ -49,6 +52,19 @@ Page({
     }
     dishes = applySelected(dishes, sale.dishIds || [], limitMap)
     const parsed = this.parseSlotFromSale(sale)
+    const oldSelected = new Set(this.data.pendingSelectedIds || [])
+    const pendingOrders = (pendingRes.ok ? pendingRes.data.orders : [])
+      .map((o) => ({
+        ...o,
+        summary: (o.items || []).map((it) => `${it.dishName}x${it.qty}`).join('，'),
+        checked: oldSelected.has(o._id),
+      }))
+      .sort((a, b) => {
+        const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0
+        const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0
+        return tb - ta
+      })
+    const pendingSelectedIds = pendingOrders.filter((o) => oldSelected.has(o._id)).map((o) => o._id)
 
     const dashRes = await call('admin', 'getDashboard')
     const activeSale = (dashRes.ok && dashRes.data && dashRes.data.activeSale) ? dashRes.data.activeSale : null
@@ -64,6 +80,8 @@ Page({
       slotLabel: parsed.slotLabel,
       activeSale,
       openDisabled,
+      pendingOrders,
+      pendingSelectedIds,
     })
   },
 
@@ -139,6 +157,13 @@ Page({
     const limitMap = { ...this.data.limitMap, [dishId]: value }
     const dishes = this.data.dishes.map((d) => (d._id === dishId ? { ...d, limitQtyInput: value } : d))
     this.setData({ limitMap, dishes })
+  },
+
+  onPendingSelect(e) {
+    const ids = Array.isArray(e.detail.value) ? e.detail.value : []
+    const idSet = new Set(ids)
+    const pendingOrders = (this.data.pendingOrders || []).map((o) => ({ ...o, checked: idSet.has(o._id) }))
+    this.setData({ pendingSelectedIds: ids, pendingOrders })
   },
 
   buildDishConfigs() {
@@ -233,9 +258,21 @@ Page({
       return
     }
 
-    const res = await call('admin', 'openSale', { saleId: sale._id })
+    const res = await call('admin', 'openSale', { saleId: sale._id, deferredOrderIds: this.data.pendingSelectedIds || [] })
     this.setData({ opening: false })
     if (!res.ok) {
+      if (res.code === 'DEFERRED_ORDER_STOCK_EXCEED' || res.code === 'DEFERRED_ORDER_DISH_MISSING') {
+        const first = res.detail && Array.isArray(res.detail.items) && res.detail.items[0]
+        let msg = res.message || '勾选的延后订单不满足条件'
+        if (first && res.code === 'DEFERRED_ORDER_STOCK_EXCEED') {
+          msg = `库存不足：${first.dishId} 需${first.requiredQty}，限${first.limitQty}`
+        }
+        if (first && res.code === 'DEFERRED_ORDER_DISH_MISSING') {
+          msg = `有菜不在本次开单：${first.dishId}`
+        }
+        wx.showToast({ title: msg, icon: 'none' })
+        return
+      }
       wx.showToast({ title: res.message || '开单失败', icon: 'none' })
       return
     }

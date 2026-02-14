@@ -1,0 +1,50 @@
+<navigation-bar title="起送价规则" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="page">
+    <view class="card">
+      <view class="title">默认起送价（可空）</view>
+      <input class="input" placeholder="例如 30.00 (EUR)" value="{{defaultMinEuro}}" bindinput="onDefaultInput" />
+      <view class="muted small">空值表示“默认无规则”，会进入待确认。</view>
+    </view>
+
+    <view class="card">
+      <view class="title">按城市配置</view>
+      <view class="muted small">城市名称不限制大小写，建议从下拉提示选择。</view>
+      <view class="rule-item" wx:for="{{rows}}" wx:key="_rid">
+        <view class="rule-row">
+          <view class="city-wrap">
+            <input
+              class="input city"
+              placeholder="ville (ex: paris)"
+              value="{{item.city}}"
+              data-idx="{{index}}"
+              bindinput="onCityInput"
+              bindfocus="onCityFocus"
+              bindblur="onCityBlur"
+            />
+          </view>
+          <view class="price-wrap">
+            <input class="input price" placeholder="EUR" value="{{item.minEuro}}" data-idx="{{index}}" bindinput="onMinInput" />
+          </view>
+          <view class="delete-wrap">
+            <button class="btn mini delete-btn" data-idx="{{index}}" bindtap="removeRow">删除</button>
+          </view>
+        </view>
+        <view class="sug" wx:if="{{citySuggestRowId===item._rid && citySuggestions.length>0}}">
+          <view
+            class="sug-item"
+            wx:for="{{citySuggestions}}"
+            wx:key="*this"
+            wx:for-item="cityName"
+            data-rid="{{item._rid}}"
+            data-city="{{cityName}}"
+            bindtap="pickCitySuggestion"
+          >{{cityName}}</view>
+        </view>
+      </view>
+      <button class="btn ghost" bindtap="addRow">新增一行</button>
+    </view>
+
+    <button class="btn" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存规则</button>
+  </view>
+</scroll-view>

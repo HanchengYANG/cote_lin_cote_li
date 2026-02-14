@@ -31,6 +31,28 @@ page {
   padding: 12rpx 16rpx;
   margin-bottom: 14rpx;
 }
+.error-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  background: #fff1f0;
+  border: 1rpx solid #ffccc7;
+  border-radius: 14rpx;
+  padding: 12rpx 16rpx;
+  margin-bottom: 14rpx;
+}
+.error-text {
+  flex: 1;
+  min-width: 0;
+  color: #a8071a;
+  font-size: 24rpx;
+  word-break: break-all;
+}
+.error-close {
+  color: #a8071a;
+  font-size: 24rpx;
+}
 
 .card {
   background: #fff;

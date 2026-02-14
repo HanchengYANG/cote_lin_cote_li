@@ -13,6 +13,11 @@
       <text wx:else class="muted">当前开单中</text>
     </view>
 
+    <view class="error-strip" wx:if="{{lastErrorMsg}}">
+      <text class="error-text">{{lastErrorMsg}}</text>
+      <text class="error-close" bindtap="clearError">关闭</text>
+    </view>
+
     <view class="card" wx:if="{{!isHydrating && dishes.length===0}}">
       <view class="muted">暂无上架菜品</view>
     </view>

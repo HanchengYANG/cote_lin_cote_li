@@ -1,0 +1,25 @@
+<navigation-bar title="{{isEdit ? '编辑地址' : '新增地址'}}" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="page">
+    <view class="card">
+      <view class="title">地址信息</view>
+      <input class="input" placeholder="地址名称（如：家 / 公司）" value="{{address.label}}" data-k="label" bindinput="onAddrInput" />
+      <input class="input" placeholder="Street address (line 1)" value="{{address.line1}}" bindinput="onLine1Input" />
+      <view class="sug" wx:if="{{suggestions.length>0}}">
+        <view class="sug-item" wx:for="{{suggestions}}" wx:key="label" data-i="{{index}}" bindtap="pickSuggestion">{{item.label}}</view>
+      </view>
+      <input class="input" placeholder="Apartment / interphone (optional)" value="{{address.line2}}" data-k="line2" bindinput="onAddrInput" />
+      <view class="row2">
+        <input class="input half" placeholder="Postal code" value="{{address.postalCode}}" data-k="postalCode" bindinput="onAddrInput" />
+        <input class="input half" placeholder="City / Ville" value="{{address.city}}" data-k="city" bindinput="onAddrInput" />
+      </view>
+      <input class="input" placeholder="电话（如 +33612345678）" value="{{address.phone}}" data-k="phone" bindinput="onAddrInput" />
+      <label class="switch-row">
+        <switch checked="{{setDefault}}" bindchange="onSetDefault" />
+        <text>设为默认地址</text>
+      </label>
+    </view>
+
+    <button class="btn" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存</button>
+  </view>
+</scroll-view>

@@ -8,25 +8,6 @@ const PAYMENT_METHODS = [
   { label: '到店付款', value: 'pickup_pay' },
 ]
 
-function normalizePhone(phone) {
-  return String(phone || '')
-    .trim()
-    .replace(/[.\-\s]/g, '')
-}
-
-function isPhoneValid(phone) {
-  const s = normalizePhone(phone)
-  return /^(\+?\d{6,20})$/.test(s)
-}
-
-function isAddressValid(addr) {
-  if (!addr) return false
-  const line1 = String(addr.line1 || '').trim()
-  const postalCode = String(addr.postalCode || '').trim()
-  const city = String(addr.city || '').trim()
-  return !!(line1 && city && /^\d{5}$/.test(postalCode))
-}
-
 function findPaymentMethodIndex(value) {
   const idx = PAYMENT_METHODS.findIndex((x) => x.value === value)
   return idx >= 0 ? idx : 0
@@ -49,28 +30,50 @@ function normalizeCartItems(input) {
   return out
 }
 
+function normalizePhone(phone) {
+  return String(phone || '')
+    .trim()
+    .replace(/[.\-\s]/g, '')
+}
+
+function isPhoneValid(phone) {
+  const s = String(phone || '').trim()
+  return /^(\+?\d{6,20})$/.test(s)
+}
+
 Page({
   data: {
-    saleStatus: 'loading', // loading | open | closed
+    saleStatus: 'loading',
     sale: null,
     cartItems: [],
     lines: [],
     totalAmountEuro: '0.00',
+    totalAmountCents: 0,
     hasExistingOrder: false,
+    existingOrderAmountCents: 0,
+    existingOrderFulfillmentType: '',
+    existingOrderAddressId: '',
     dishesById: {},
+    profile: null,
+    addresses: [],
+    selectedAddressId: '',
+    selectedAddressIndex: 0,
+    selectedAddressTitle: '',
+    selectedAddressDetail: '',
 
     fulfillmentType: 'delivery',
-    phone: '',
-    address: { line1: '', line2: '', postalCode: '', city: '', country: 'FR' },
     acceptDeliverySlot: false,
-    addrSuggestions: [],
-    suggesting: false,
+
+    minOrderText: '',
+    minOrderHint: '',
+    pendingReviewHint: false,
 
     paymentMethodLabels: PAYMENT_METHODS,
     paymentMethodIndex: 0,
     paymentMethodLabel: PAYMENT_METHODS[0].label,
 
     remark: '',
+    pickupPhone: '',
     submitting: false,
     submitDisabled: true,
     submitDisabledReason: '',
@@ -85,6 +88,26 @@ Page({
       return
     }
     this.setData({ cartItems })
+    this._firstShowDone = false
+    await this.reload()
+  },
+
+  async onShow() {
+    const pickedAddressId = String(wx.getStorageSync('checkout_selected_address_id') || '').trim()
+    if (pickedAddressId) {
+      wx.removeStorageSync('checkout_selected_address_id')
+      const lockedAddress = this.data.hasExistingOrder && this.data.fulfillmentType === 'delivery'
+      if (!lockedAddress) {
+        this.setData({ selectedAddressId: pickedAddressId })
+        this.syncSelectedAddressView()
+        this.recomputeAddressRuleHint()
+        this.recomputeSubmitDisabled()
+      }
+    }
+    if (!this._firstShowDone) {
+      this._firstShowDone = true
+      return
+    }
     await this.reload()
   },
 
@@ -95,27 +118,90 @@ Page({
     })
   },
 
+  getAddressById(id) {
+    return (this.data.addresses || []).find((x) => x.id === id) || null
+  },
+
+  decorateAddress(a) {
+    if (!a) return null
+    const title = String(a.label || '').trim() || `${String(a.line1 || '').trim()} ${String(a.city || '').trim()}`.trim()
+    const detail = [a.line1, a.line2, a.postalCode, a.city, a.country].filter(Boolean).join(', ')
+    return { ...a, title, detail }
+  },
+
+  syncSelectedAddressView() {
+    const arr = this.data.addresses || []
+    const currentId = String(this.data.selectedAddressId || '').trim()
+    const idx = arr.findIndex((x) => x.id === currentId)
+    const picked = idx >= 0 ? arr[idx] : null
+    this.setData({
+      selectedAddressIndex: idx >= 0 ? idx : 0,
+      selectedAddressTitle: picked ? picked.title : '',
+      selectedAddressDetail: picked ? picked.detail : '',
+    })
+  },
+
+  recomputeAddressRuleHint() {
+    const addr = this.getAddressById(this.data.selectedAddressId)
+    if (this.data.fulfillmentType !== 'delivery' || !addr) {
+      this.setData({ minOrderText: '', minOrderHint: '', pendingReviewHint: false })
+      return
+    }
+    const minOrderCents = Number(addr.minOrderCents || 0)
+    if (minOrderCents > 0) {
+      this.setData({
+        minOrderText: `该地址起送价：€${centToEuro(minOrderCents)}`,
+        minOrderHint: '',
+        pendingReviewHint: false,
+      })
+      return
+    }
+    this.setData({
+      minOrderText: '',
+      minOrderHint: '该 ville 暂无起送价规则，提交后会变为“待店主确认”，且不会立即扣库存。',
+      pendingReviewHint: true,
+    })
+  },
+
   async reload() {
     this.setData({ saleStatus: 'loading' })
-    const res = await call('customer', 'getCurrentSale')
-    if (res && !res.ok) {
-      wx.showToast({ title: res.message || '加载开单失败', icon: 'none' })
+    const [saleRes, profileRes] = await Promise.all([call('customer', 'getCurrentSale'), call('customer', 'getMyProfile')])
+    if (saleRes && !saleRes.ok) {
+      wx.showToast({ title: saleRes.message || '加载开单失败', icon: 'none' })
+    }
+    if (!profileRes || !profileRes.ok || !profileRes.data || !profileRes.data.profile) {
+      wx.showToast({ title: '资料加载失败', icon: 'none' })
+      return
     }
 
-    if (!res.ok || !res.data || !res.data.sale) {
+    const profile = profileRes.data.profile
+    const rawAddresses = Array.isArray(profile.addresses) ? profile.addresses : []
+    const addresses = rawAddresses.map((a) => this.decorateAddress(a)).filter(Boolean)
+    if (!saleRes.ok || !saleRes.data || !saleRes.data.sale) {
+      let selectedAddressId = String(this.data.selectedAddressId || '').trim()
+      if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = String(profile.defaultAddressId || '')
+      if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = String((addresses[0] && addresses[0].id) || '')
       this.setData({
         saleStatus: 'closed',
         sale: null,
         hasExistingOrder: false,
+        existingOrderAmountCents: 0,
+        existingOrderFulfillmentType: '',
+        existingOrderAddressId: '',
         dishesById: {},
+        profile,
+        addresses,
+        selectedAddressId,
       })
+      this.syncSelectedAddressView()
       this.recalcLines()
+      this.recomputeAddressRuleHint()
       this.recomputeSubmitDisabled()
       return
     }
 
-    const sale = res.data.sale
-    const dishes = Array.isArray(res.data.dishes) ? res.data.dishes : []
+    const sale = saleRes.data.sale
+    const dishes = Array.isArray(saleRes.data.dishes) ? saleRes.data.dishes : []
     const allowedSet = new Set((sale.dishIds || []).filter(Boolean))
     const dishesById = {}
     for (const d of dishes) dishesById[d._id] = d
@@ -131,37 +217,51 @@ Page({
     const orderRes = await call('customer', 'getMySaleOrder', { saleId: sale._id })
     if (orderRes.ok && orderRes.data && orderRes.data.order) existingOrder = orderRes.data.order
 
+    let selectedAddressId = String(this.data.selectedAddressId || '').trim()
+    if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = ''
+    if (existingOrder && existingOrder.addressId) {
+      selectedAddressId = String(existingOrder.addressId)
+    }
+    if (!selectedAddressId) selectedAddressId = String(profile.defaultAddressId || '')
+    if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = String((addresses[0] && addresses[0].id) || '')
+
     const next = {
       saleStatus: 'open',
       sale,
       dishesById,
       cartItems,
       hasExistingOrder: !!existingOrder,
+      existingOrderAmountCents: Number((existingOrder && existingOrder.totals && existingOrder.totals.amountCents) || 0),
+      existingOrderFulfillmentType: String((existingOrder && existingOrder.fulfillmentType) || ''),
+      existingOrderAddressId: String((existingOrder && existingOrder.addressId) || ''),
+      profile,
+      addresses,
+      selectedAddressId,
     }
+    const selectedAddr = addresses.find((x) => x.id === selectedAddressId) || null
+    let pickupPhone = normalizePhone(this.data.pickupPhone || '')
+    if (!pickupPhone && selectedAddr && selectedAddr.phone) pickupPhone = normalizePhone(selectedAddr.phone)
     if (existingOrder) {
       const method = String((existingOrder.payment && existingOrder.payment.method) || 'cash')
       const methodIdx = findPaymentMethodIndex(method)
       next.fulfillmentType = existingOrder.fulfillmentType || 'delivery'
-      next.phone = String((existingOrder.contact && existingOrder.contact.phone) || '')
-      next.address =
-        existingOrder.fulfillmentType === 'delivery' && existingOrder.address
-          ? {
-              line1: String(existingOrder.address.line1 || ''),
-              line2: String(existingOrder.address.line2 || ''),
-              postalCode: String(existingOrder.address.postalCode || ''),
-              city: String(existingOrder.address.city || ''),
-              country: 'FR',
-            }
-          : { line1: '', line2: '', postalCode: '', city: '', country: 'FR' }
       next.acceptDeliverySlot = existingOrder.fulfillmentType === 'delivery'
       next.paymentMethodIndex = methodIdx
       next.paymentMethodLabel = PAYMENT_METHODS[methodIdx].label
       next.remark = String(existingOrder.remark || '')
+      if (next.fulfillmentType === 'pickup') {
+        pickupPhone = normalizePhone(existingOrder && existingOrder.contact && existingOrder.contact.phone)
+      }
+    } else if (addresses.length === 0) {
+      next.fulfillmentType = 'pickup'
+      next.acceptDeliverySlot = false
     }
-
+    next.pickupPhone = pickupPhone
     this.setData(next)
+    this.syncSelectedAddressView()
     this.saveCart()
     this.recalcLines()
+    this.recomputeAddressRuleHint()
     this.recomputeSubmitDisabled()
   },
 
@@ -180,7 +280,6 @@ Page({
         dishId: it.dishId,
         name: dish ? String(dish.name || it.name || '') : String(it.name || ''),
         qty,
-        unitPriceCents,
         unitPriceEuro: centToEuro(unitPriceCents),
         lineTotalEuro: centToEuro(lineTotalCents),
       })
@@ -188,72 +287,21 @@ Page({
     this.setData({
       lines,
       totalAmountEuro: centToEuro(totalCents),
+      totalAmountCents: totalCents,
     })
   },
 
   onFulfillmentChange(e) {
+    if (this.data.hasExistingOrder) {
+      wx.showToast({ title: '已有订单不可修改交货方式', icon: 'none' })
+      return
+    }
     const v = e.detail.value
     this.setData({
       fulfillmentType: v,
       acceptDeliverySlot: v === 'delivery' ? this.data.acceptDeliverySlot : false,
     })
-    this.recomputeSubmitDisabled()
-  },
-
-  onPhoneInput(e) {
-    this.setData({ phone: e.detail.value })
-    this.recomputeSubmitDisabled()
-  },
-
-  onAddr(e) {
-    const k = e.currentTarget.dataset.k
-    const address = { ...this.data.address, [k]: e.detail.value }
-    this.setData({ address })
-    this.recomputeSubmitDisabled()
-  },
-
-  onLine1Input(e) {
-    const address = { ...this.data.address, line1: e.detail.value }
-    this.setData({ address })
-    this.recomputeSubmitDisabled()
-    this.debouncedSuggest(address.line1)
-  },
-
-  debouncedSuggest(q) {
-    const s = String(q || '').trim()
-    if (this._suggestTimer) clearTimeout(this._suggestTimer)
-    if (s.length < 3) {
-      this.setData({ addrSuggestions: [] })
-      return
-    }
-    this._suggestTimer = setTimeout(() => {
-      this.fetchSuggestions(s)
-    }, 300)
-  },
-
-  async fetchSuggestions(q) {
-    this.setData({ suggesting: true })
-    const res = await call('customer', 'suggestAddress', { q, limit: 5 })
-    this.setData({ suggesting: false })
-    if (!res.ok) {
-      this.setData({ addrSuggestions: [] })
-      return
-    }
-    this.setData({ addrSuggestions: res.data.suggestions || [] })
-  },
-
-  pickSuggestion(e) {
-    const i = Number(e.currentTarget.dataset.i)
-    const s = (this.data.addrSuggestions || [])[i]
-    if (!s) return
-    const address = {
-      ...this.data.address,
-      line1: s.line1 || s.label || '',
-      postalCode: s.postalCode || '',
-      city: s.city || '',
-      country: 'FR',
-    }
-    this.setData({ address, addrSuggestions: [] })
+    this.recomputeAddressRuleHint()
     this.recomputeSubmitDisabled()
   },
 
@@ -272,6 +320,36 @@ Page({
 
   onRemarkInput(e) {
     this.setData({ remark: e.detail.value })
+  },
+
+  onPickupPhoneInput(e) {
+    const v = normalizePhone(e && e.detail && e.detail.value)
+    this.setData({ pickupPhone: v })
+    this.recomputeSubmitDisabled()
+  },
+
+  onAddressPick(e) {
+    if (this.data.hasExistingOrder && this.data.fulfillmentType === 'delivery') {
+      wx.showToast({ title: '已有订单不可修改地址', icon: 'none' })
+      return
+    }
+    const idx = Number(e.detail.value || 0)
+    const arr = this.data.addresses || []
+    const picked = arr[idx]
+    if (!picked) return
+    this.setData({ selectedAddressId: picked.id })
+    this.syncSelectedAddressView()
+    this.recomputeAddressRuleHint()
+    this.recomputeSubmitDisabled()
+  },
+
+  goAddressBook() {
+    if (this.data.hasExistingOrder && this.data.fulfillmentType === 'delivery') {
+      wx.showToast({ title: '已有订单不可修改地址', icon: 'none' })
+      return
+    }
+    const selectedAddressId = String(this.data.selectedAddressId || '')
+    wx.navigateTo({ url: `/pages/address-book/index?select=1&selectedAddressId=${encodeURIComponent(selectedAddressId)}` })
   },
 
   recomputeSubmitDisabled() {
@@ -293,18 +371,23 @@ Page({
       disabled = true
       reason = '当前未开单，暂不可提交订单'
     }
-    if (!disabled && !isPhoneValid(this.data.phone)) {
-      disabled = true
-      reason = '请填写正确的电话（仅数字，可带+号）'
-    }
+    const addr = this.getAddressById(this.data.selectedAddressId)
+    const mergedTotalCents = Number(this.data.totalAmountCents || 0) + Number(this.data.existingOrderAmountCents || 0)
     if (!disabled && this.data.fulfillmentType === 'delivery') {
-      if (!isAddressValid(this.data.address)) {
+      if (!addr) {
         disabled = true
-        reason = '请填写法国地址（line1 / postal code / city）'
+        reason = '请选择地址'
+      } else if (Number(addr.minOrderCents || 0) > 0 && mergedTotalCents < Number(addr.minOrderCents || 0)) {
+        disabled = true
+        reason = `未达到起送价 €${centToEuro(addr.minOrderCents || 0)}`
       } else if (!this.data.acceptDeliverySlot) {
         disabled = true
         reason = '请勾选“我接受该时间段”'
       }
+    }
+    if (!disabled && this.data.fulfillmentType === 'pickup' && !isPhoneValid(this.data.pickupPhone)) {
+      disabled = true
+      reason = '自取请填写有效电话'
     }
     this.setData({ submitDisabled: disabled, submitDisabledReason: reason })
   },
@@ -314,12 +397,21 @@ Page({
     this.setData({ submitting: true })
     this.recomputeSubmitDisabled()
     const paymentMethod = PAYMENT_METHODS[this.data.paymentMethodIndex].value
+    const lockedType = String(this.data.existingOrderFulfillmentType || '').trim()
+    const effectiveType = this.data.hasExistingOrder && lockedType ? lockedType : this.data.fulfillmentType
+    const lockedAddressId = String(this.data.existingOrderAddressId || '').trim()
+    const effectiveAddressId =
+      effectiveType === 'delivery'
+        ? this.data.hasExistingOrder && lockedAddressId
+          ? lockedAddressId
+          : this.data.selectedAddressId
+        : ''
     const payload = {
       saleId: this.data.sale && this.data.sale._id,
-      fulfillmentType: this.data.fulfillmentType,
-      phone: normalizePhone(this.data.phone),
-      address: this.data.fulfillmentType === 'delivery' ? this.data.address : null,
-      acceptDeliverySlot: this.data.fulfillmentType === 'delivery' ? !!this.data.acceptDeliverySlot : false,
+      fulfillmentType: effectiveType,
+      addressId: effectiveAddressId,
+      phone: effectiveType === 'pickup' ? normalizePhone(this.data.pickupPhone) : '',
+      acceptDeliverySlot: effectiveType === 'delivery' ? !!this.data.acceptDeliverySlot : false,
       items: this.data.cartItems.map((it) => ({ dishId: it.dishId, qty: Number(it.qty || 0) })),
       payment: { method: paymentMethod },
       remark: String(this.data.remark || '').trim(),
@@ -331,6 +423,21 @@ Page({
       if (res.code === 'OUT_OF_STOCK') {
         wx.showToast({ title: outOfStockMessage(res.detail, '库存不足，请返回菜单调整'), icon: 'none' })
         await this.reload()
+        return
+      }
+      if (res.code === 'MIN_ORDER_NOT_MET') {
+        const d = res.detail || {}
+        const msg = `未达到起送价：€${centToEuro(d.minOrderCents || 0)}`
+        wx.showToast({ title: msg, icon: 'none' })
+        return
+      }
+      if (res.code === 'FULFILLMENT_LOCKED' || res.code === 'ADDRESS_LOCKED') {
+        wx.showToast({ title: res.message || '已有订单不可修改交货方式或地址', icon: 'none' })
+        await this.reload()
+        return
+      }
+      if (res.code === 'INVALID_PHONE') {
+        wx.showToast({ title: '请填写有效电话', icon: 'none' })
         return
       }
       wx.showToast({ title: res.message || '下单失败', icon: 'none' })

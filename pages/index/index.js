@@ -2,7 +2,7 @@ const { call } = require('../../utils/api')
 const { centToEuro } = require('../../utils/format')
 const { getSession } = require('../../utils/session')
 
-const HOME_CACHE_KEY = 'home_bootstrap_cache_v3'
+const HOME_CACHE_KEY = 'home_bootstrap_cache_v4'
 
 function calcTotals(dishes, qtyMap) {
   let totalQty = 0
@@ -45,19 +45,33 @@ Page({
       saleId: '',
       deliveryTimeSlotLabel: '',
     },
+    profileSummary: {
+      isComplete: false,
+      nickname: '',
+      addressCount: 0,
+      defaultAddressId: '',
+    },
     dishes: [],
     qtyMap: {},
     totalQty: 0,
     totalAmountEuro: '0.00',
+    lastErrorMsg: '',
   },
 
   onLoad() {
+    this._hasLoadedOnce = true
     this.bootstrap()
+  },
+
+  onShow() {
+    if (!this._hasLoadedOnce) return
+    if (this.data.isHydrating) return
+    this.reload({ silent: true })
   },
 
   async bootstrap() {
     if (!wx.cloud) {
-      wx.showToast({ title: '请先启用云开发', icon: 'none' })
+      this.reportError('请先启用云开发')
       return
     }
     this.hydrateFromCache()
@@ -69,10 +83,10 @@ Page({
   hydrateFromCache() {
     const cached = wx.getStorageSync(HOME_CACHE_KEY)
     if (!cached || !Array.isArray(cached.dishes) || !cached.sale) return
-    this.applyBootstrap(cached.sale, cached.dishes)
+    this.applyBootstrap(cached.sale, cached.dishes, cached.profile || null)
   },
 
-  applyBootstrap(rawSale, rawDishes) {
+  applyBootstrap(rawSale, rawDishes, rawProfile) {
     const prevQtyMap = { ...(this.data.qtyMap || {}) }
     const saleInfo = {
       isOpen: !!(rawSale && rawSale.isOpen),
@@ -106,14 +120,39 @@ Page({
     const qtyMap = {}
     for (const d of sorted) qtyMap[d._id] = Number(d.qty || 0)
     const { totalQty, totalAmountCents } = calcTotals(sorted, qtyMap)
+    const profileSummary = {
+      isComplete: !!(rawProfile && rawProfile.isComplete),
+      nickname: String((rawProfile && rawProfile.nickname) || ''),
+      addressCount: Number((rawProfile && rawProfile.addressCount) || 0),
+      defaultAddressId: String((rawProfile && rawProfile.defaultAddressId) || ''),
+    }
     this.setData({
       saleInfo,
+      profileSummary,
       dishes: sorted,
       qtyMap,
       totalQty,
       totalAmountEuro: centToEuro(totalAmountCents),
       isHydrating: false,
+      lastErrorMsg: '',
     })
+  },
+
+  reportError(message, detail) {
+    const msg = String(message || '未知错误')
+    const now = new Date()
+    const hh = `${now.getHours()}`.padStart(2, '0')
+    const mm = `${now.getMinutes()}`.padStart(2, '0')
+    const ss = `${now.getSeconds()}`.padStart(2, '0')
+    const stamped = `[${hh}:${mm}:${ss}] ${msg}`
+    this.setData({ lastErrorMsg: stamped })
+    // eslint-disable-next-line no-console
+    console.error('[index]', msg, detail || '')
+    wx.showToast({ title: msg, icon: 'none', duration: 5000 })
+  },
+
+  clearError() {
+    this.setData({ lastErrorMsg: '' })
   },
 
   async reload(options = {}) {
@@ -123,17 +162,29 @@ Page({
     if (!silent) this.setData({ refresherTriggered: false })
     if (!res.ok) {
       this.setData({ isHydrating: false })
-      wx.showToast({ title: res.message || '加载菜单失败', icon: 'none' })
+      this.reportError(res.message || '加载菜单失败', res)
       return
     }
     const sale = (res.data && res.data.sale) || { isOpen: false, saleId: '', deliveryTimeSlotLabel: '' }
     const dishes = (res.data && res.data.dishes) || []
-    this.applyBootstrap(sale, dishes)
+    const profile = (res.data && res.data.profile) || null
+    this.applyBootstrap(sale, dishes, profile)
     wx.setStorageSync(HOME_CACHE_KEY, {
       updatedAt: Date.now(),
       sale,
       dishes,
+      profile,
     })
+    const isComplete = !!(profile && profile.isComplete)
+    if (!isComplete && !this._profileRedirecting) {
+      this._profileRedirecting = true
+      wx.navigateTo({
+        url: '/pages/profile-setup/index?from=index',
+        complete: () => {
+          this._profileRedirecting = false
+        },
+      })
+    }
   },
 
   onPullDownRefresh() {
@@ -184,6 +235,10 @@ Page({
   },
 
   goCheckout() {
+    if (!this.data.profileSummary || !this.data.profileSummary.isComplete) {
+      wx.navigateTo({ url: '/pages/profile-setup/index?from=checkout' })
+      return
+    }
     const items = []
     for (const d of this.data.dishes) {
       const qty = Number(d.qty || 0)

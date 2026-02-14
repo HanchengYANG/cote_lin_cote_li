@@ -2,14 +2,10 @@
 <scroll-view class="scrollarea" scroll-y type="list">
   <view class="page">
     <view class="card">
-      <view class="title">筛选</view>
+      <view class="title">开单</view>
       <picker mode="selector" range="{{saleOptions}}" range-key="label" value="{{saleIndex}}" bindchange="onPickSale">
         <view class="picker">开单：{{saleLabel}}</view>
       </picker>
-      <picker mode="selector" range="{{typeOptions}}" range-key="label" value="{{typeIndex}}" bindchange="onPickType">
-        <view class="picker">类型：{{typeLabel}}</view>
-      </picker>
-      <button class="btn ghost" size="mini" bindtap="reload">刷新</button>
     </view>
 
     <view class="card" wx:if="{{orders.length===0 && !loading}}">
@@ -23,9 +19,11 @@
           <view class="muted small">{{item.createdAtText}}</view>
         </view>
         <view class="mid">
-          <view class="strong">{{item.fulfillmentText}}</view>
-          <view class="muted small">电话：{{item.contact.phone}}</view>
+          <view class="muted small">客人：{{item.customerNameText}}</view>
+          <view class="muted small">电话：{{item.phoneText}}</view>
+          <view class="muted small" wx:if="{{item.fulfillmentType==='delivery' && item.addressText}}">地址：{{item.addressText}}</view>
           <view class="muted small" wx:if="{{item.deliveryTimeSlotLabelSnapshot}}">时间段：{{item.deliveryTimeSlotLabelSnapshot}}</view>
+          <view class="meta">{{item.fulfillmentText}}</view>
         </view>
         <view class="muted small">€{{item.totals.amountEuro}}（{{item.totals.qty}}件）</view>
       </view>

@@ -1,6 +1,79 @@
 <navigation-bar title="订单详情" back="{{true}}" color="black" background="#FFF"></navigation-bar>
 <scroll-view class="scrollarea" scroll-y type="list">
   <view class="page">
+    <view class="card" wx:if="{{order}}">
+      <view class="title">交货方式设置</view>
+      <radio-group bindchange="onFulfillmentChange">
+        <label class="radio">
+          <radio value="delivery" checked="{{fulfillmentTypeDraft==='delivery'}}" />
+          <text>配送</text>
+        </label>
+        <label class="radio">
+          <radio value="pickup" checked="{{fulfillmentTypeDraft==='pickup'}}" />
+          <text>自取</text>
+        </label>
+      </radio-group>
+      <view class="field">
+        <view class="label">联系电话</view>
+        <input class="input" value="{{phoneDraft}}" placeholder="电话（如 +336...）" bindinput="onPhoneInput" />
+      </view>
+      <view class="field" wx:if="{{fulfillmentTypeDraft==='delivery'}}">
+        <view class="label">配送地址</view>
+        <radio-group class="mode-group" bindchange="onAddressModeChange">
+          <label class="radio">
+            <radio value="saved" checked="{{addressMode==='saved'}}" />
+            <text>客户已存地址</text>
+          </label>
+          <label class="radio">
+            <radio value="manual" checked="{{addressMode==='manual'}}" />
+            <text>手动填写</text>
+          </label>
+        </radio-group>
+
+        <view wx:if="{{addressMode==='saved'}}">
+          <picker mode="selector" range="{{customerAddresses}}" range-key="label" value="{{selectedAddressIndex}}" bindchange="onPickSavedAddress">
+            <view class="picker" wx:if="{{customerAddresses.length}}">已选：{{customerAddresses[selectedAddressIndex].label || customerAddresses[selectedAddressIndex].line1}}</view>
+            <view class="picker" wx:else>客户暂无已存地址，请切换手动填写</view>
+          </picker>
+          <view class="muted small" wx:if="{{customerAddresses.length}}">
+            {{customerAddresses[selectedAddressIndex].line1}} {{customerAddresses[selectedAddressIndex].line2}} {{customerAddresses[selectedAddressIndex].postalCode}} {{customerAddresses[selectedAddressIndex].city}} {{customerAddresses[selectedAddressIndex].country}}
+          </view>
+        </view>
+
+        <view wx:if="{{addressMode==='manual'}}">
+          <input class="input" data-k="label" value="{{manualAddress.label}}" placeholder="地址标签（可选）" bindinput="onManualAddressInput" />
+          <input class="input" data-k="line1" value="{{manualAddress.line1}}" placeholder="街道地址 line1" bindinput="onManualAddressInput" />
+          <input class="input" data-k="line2" value="{{manualAddress.line2}}" placeholder="补充信息 line2（可选）" bindinput="onManualAddressInput" />
+          <view class="row2">
+            <input class="input half" data-k="postalCode" value="{{manualAddress.postalCode}}" placeholder="邮编" bindinput="onManualAddressInput" />
+            <input class="input half" data-k="city" value="{{manualAddress.city}}" placeholder="城市" bindinput="onManualAddressInput" />
+          </view>
+          <input class="input" data-k="country" value="{{manualAddress.country}}" placeholder="国家（默认 FR）" bindinput="onManualAddressInput" />
+        </view>
+      </view>
+      <view class="picker-row" wx:if="{{fulfillmentTypeDraft==='delivery'}}">
+        <picker mode="date" value="{{slotDate}}" bindchange="onPickDate">
+          <view class="picker">日期：{{slotDate || '请选择'}}</view>
+        </picker>
+        <picker mode="time" value="{{slotStart}}" bindchange="onPickStart">
+          <view class="picker">开始：{{slotStart || '请选择'}}</view>
+        </picker>
+        <picker mode="time" value="{{slotEnd}}" bindchange="onPickEnd">
+          <view class="picker">结束：{{slotEnd || '请选择'}}</view>
+        </picker>
+      </view>
+      <view class="muted small" wx:if="{{fulfillmentTypeDraft==='delivery' && deliverySlotInput}}">当前时间段：{{deliverySlotInput}}</view>
+    </view>
+
+    <view class="card" wx:if="{{isPendingReview}}">
+      <view class="title">待确认操作</view>
+      <view class="muted small">立即确认会立刻扣减当前开单库存；不操作则可在下次开单时勾选“延后确认”。</view>
+      <view class="row">
+        <button class="btn ghost" loading="{{approving}}" disabled="{{approving || rejecting}}" bindtap="onApproveNow">立即确认</button>
+        <button class="btn danger" loading="{{rejecting}}" disabled="{{approving || rejecting}}" bindtap="onReject">拒绝订单</button>
+      </view>
+    </view>
+
     <order-editor
       order="{{order}}"
       editable-items="{{editableItems}}"
@@ -10,6 +83,7 @@
       saving="{{saving}}"
       cancelling="{{cancelling}}"
       show-payment-status="{{true}}"
+      show-fulfillment="{{false}}"
       edit-hint="店主可直接修改本单菜品数量；如需整单作废请点“取消整单”。"
       lock-hint="订单已取消，不可编辑。"
       bindqtychange="onQtyChange"

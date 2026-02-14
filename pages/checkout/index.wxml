@@ -29,8 +29,9 @@
     </view>
 
     <view class="card">
-      <view class="title">履约方式</view>
-      <radio-group bindchange="onFulfillmentChange">
+      <view class="title">交货方式</view>
+      <view wx:if="{{hasExistingOrder}}" class="muted">已有订单，本次仅追加菜品，交货方式不可修改（{{fulfillmentType==='delivery' ? '配送' : '自取'}}）</view>
+      <radio-group wx:else bindchange="onFulfillmentChange">
         <label class="radio">
           <radio value="delivery" checked="{{fulfillmentType==='delivery'}}" />
           <text>配送</text>
@@ -42,24 +43,23 @@
       </radio-group>
     </view>
 
-    <view class="card">
-      <view class="title">联系方式</view>
-      <input class="input" placeholder="电话（必填，如 +33 或 06...）" value="{{phone}}" bindinput="onPhoneInput" />
-    </view>
-
     <view class="card" wx:if="{{fulfillmentType==='delivery'}}">
-      <view class="title">配送地址</view>
-      <input class="input" placeholder="Street address (line 1)" value="{{address.line1}}" bindinput="onLine1Input" />
-      <view class="sug" wx:if="{{addrSuggestions.length>0}}">
-        <view class="sug-item" wx:for="{{addrSuggestions}}" wx:key="label" bindtap="pickSuggestion" data-i="{{index}}">
-          <view class="sug-label">{{item.label}}</view>
-        </view>
+      <view class="row">
+        <view class="title">下单地址</view>
+        <button wx:if="{{!hasExistingOrder}}" class="btn ghost mini" bindtap="goAddressBook">管理地址</button>
       </view>
-      <input class="input" placeholder="Apartment / door code (line 2, optional)" value="{{address.line2}}" bindinput="onAddr" data-k="line2" />
-      <view class="row2">
-        <input class="input half" placeholder="Postal code" value="{{address.postalCode}}" bindinput="onAddr" data-k="postalCode" />
-        <input class="input half" placeholder="City" value="{{address.city}}" bindinput="onAddr" data-k="city" />
+      <view wx:if="{{hasExistingOrder}}">
+        <view class="picker" wx:if="{{selectedAddressTitle}}">当前地址：{{selectedAddressTitle}}（已锁定）</view>
+        <view class="picker" wx:else>当前地址：请选择地址</view>
+        <view class="muted small">已有订单不可修改地址</view>
       </view>
+      <picker wx:else mode="selector" range="{{addresses}}" range-key="title" value="{{selectedAddressIndex}}" bindchange="onAddressPick">
+        <view class="picker" wx:if="{{selectedAddressTitle}}">当前地址：{{selectedAddressTitle}}</view>
+        <view class="picker" wx:else>当前地址：请选择地址</view>
+      </picker>
+      <view class="muted small" wx:if="{{selectedAddressDetail}}">{{selectedAddressDetail}}</view>
+      <view class="muted small" wx:if="{{fulfillmentType==='delivery' && minOrderText}}">{{minOrderText}}</view>
+      <view class="warn-text small" wx:if="{{fulfillmentType==='delivery' && minOrderHint}}">{{minOrderHint}}</view>
     </view>
 
     <view class="card" wx:if="{{fulfillmentType==='delivery'}}">
@@ -72,6 +72,12 @@
           <text>我接受该时间段</text>
         </label>
       </checkbox-group>
+    </view>
+
+    <view class="card" wx:if="{{fulfillmentType==='pickup'}}">
+      <view class="title">联系电话</view>
+      <input class="input" value="{{pickupPhone}}" placeholder="自取请填写电话（如 +336...）" bindinput="onPickupPhoneInput" />
+      <view class="muted small">店主会通过电话联系自取安排。</view>
     </view>
 
     <view class="card">

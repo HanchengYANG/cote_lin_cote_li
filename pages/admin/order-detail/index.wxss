@@ -13,3 +13,90 @@ page {
 .page {
   padding: 24rpx;
 }
+.card {
+  background: #fff;
+  border-radius: 20rpx;
+  padding: 22rpx;
+  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.06);
+  margin-bottom: 18rpx;
+}
+.title {
+  font-size: 30rpx;
+  font-weight: 700;
+  margin-bottom: 14rpx;
+}
+.radio {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  padding: 8rpx 0;
+}
+.muted {
+  color: rgba(0, 0, 0, 0.55);
+}
+.small {
+  font-size: 24rpx;
+}
+.field {
+  margin-top: 10rpx;
+}
+.label {
+  font-size: 26rpx;
+  font-weight: 600;
+  margin-bottom: 8rpx;
+}
+.input {
+  border: 1rpx solid rgba(0, 0, 0, 0.12);
+  border-radius: 14rpx;
+  padding: 14rpx 12rpx;
+  font-size: 24rpx;
+  margin-top: 10rpx;
+}
+.mode-group {
+  margin-top: 4rpx;
+}
+.picker-row {
+  display: flex;
+  gap: 10rpx;
+  margin-top: 8rpx;
+  margin-bottom: 8rpx;
+}
+.picker-row picker {
+  flex: 1;
+  min-width: 0;
+}
+.picker {
+  border: 1rpx solid rgba(0, 0, 0, 0.12);
+  border-radius: 14rpx;
+  padding: 14rpx 12rpx;
+  font-size: 24rpx;
+  color: rgba(0, 0, 0, 0.75);
+}
+.row2 {
+  display: flex;
+  gap: 10rpx;
+}
+.half {
+  flex: 1;
+  min-width: 0;
+}
+.row {
+  display: flex;
+  gap: 12rpx;
+  margin-top: 14rpx;
+}
+.btn {
+  flex: 1;
+  height: 78rpx;
+  line-height: 78rpx;
+  border-radius: 14rpx;
+}
+.btn.ghost {
+  background: #fff;
+  color: #111;
+  border: 1rpx solid rgba(0, 0, 0, 0.18);
+}
+.btn.danger {
+  background: #d93025;
+  color: #fff;
+}

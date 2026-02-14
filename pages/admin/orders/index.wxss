@@ -29,15 +29,6 @@ page {
   padding: 18rpx 16rpx;
   margin-top: 12rpx;
 }
-.btn.ghost {
-  background: transparent;
-  color: #111;
-  border: 1rpx solid rgba(0, 0, 0, 0.18);
-  border-radius: 16rpx;
-  height: 60rpx;
-  line-height: 60rpx;
-  margin-top: 12rpx;
-}
 .list {
   display: flex;
   flex-direction: column;
@@ -68,14 +59,23 @@ page {
   background: rgba(255, 0, 0, 0.10);
   color: #b00020;
 }
+.tag.pending {
+  background: rgba(255, 186, 8, 0.2);
+  color: #7a4f00;
+}
 .muted {
   color: rgba(0, 0, 0, 0.55);
 }
 .small {
   font-size: 24rpx;
 }
-.strong {
-  font-weight: 700;
-  font-size: 30rpx;
+.mid {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
 }
-
+.meta {
+  margin-top: 4rpx;
+  font-size: 22rpx;
+  color: rgba(0, 0, 0, 0.45);
+}

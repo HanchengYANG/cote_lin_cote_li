@@ -1,4 +1,5 @@
 const cloud = require('wx-server-sdk')
+const crypto = require('crypto')
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
@@ -7,6 +8,12 @@ const _ = db.command
 
 // Admin whitelist enforcement.
 const BYPASS_ADMIN_AUTH = false
+const ORDER_STATUS = {
+  ACTIVE: 'ACTIVE',
+  CANCELLED: 'CANCELLED',
+  PENDING_REVIEW: 'PENDING_REVIEW',
+  REJECTED: 'REJECTED',
+}
 
 function ok(data) {
   return { ok: true, data }
@@ -107,6 +114,23 @@ function toSafeInt(v, fallback = 0) {
   return Math.floor(n)
 }
 
+function normalizeDeliveryMinByCity(input) {
+  const raw = input && typeof input === 'object' ? input : {}
+  const out = {}
+  for (const key of Object.keys(raw)) {
+    const city = String(key || '')
+    if (!city.trim()) continue
+    const cents = toSafeInt(raw[key], NaN)
+    if (!Number.isFinite(cents) || cents <= 0) continue
+    out[city] = cents
+  }
+  return out
+}
+
+function buildOrderId(saleId, openId) {
+  return crypto.createHash('md5').update(`${String(saleId || '')}:${String(openId || '')}`).digest('hex')
+}
+
 function parseAndValidateDeliverySlot(event) {
   const deliverySlotDate = event.deliverySlotDate ? String(event.deliverySlotDate).trim() : ''
   const deliverySlotStartTime = event.deliverySlotStartTime ? String(event.deliverySlotStartTime).trim() : ''
@@ -124,6 +148,72 @@ function parseAndValidateDeliverySlot(event) {
     deliverySlotStartTime,
     deliverySlotEndTime,
     deliveryTimeSlotLabel: `${deliverySlotDate} ${deliverySlotStartTime}-${deliverySlotEndTime}`,
+  }
+}
+
+function normalizePhone(phone) {
+  return String(phone || '')
+    .trim()
+    .replace(/[.\-\s]/g, '')
+}
+
+function isPhoneValid(phone) {
+  const s = String(phone || '').trim()
+  return /^(\+?\d{6,20})$/.test(s)
+}
+
+function normalizeAddressPayload(input) {
+  const source = input || {}
+  const line1 = String(source.line1 || '').trim()
+  const line2 = String(source.line2 || '').trim()
+  const postalCode = String(source.postalCode || '').trim()
+  const city = String(source.city || '').trim()
+  const country = String(source.country || 'FR')
+    .trim()
+    .toUpperCase()
+  const label = String(source.label || '').trim().slice(0, 40)
+  if (!line1 || !city) return null
+  if (!/^\d{5}$/.test(postalCode)) return null
+  if ((country || 'FR') !== 'FR') return null
+  return {
+    label,
+    line1,
+    line2,
+    postalCode,
+    city,
+    country: 'FR',
+  }
+}
+
+function normalizeStoredAddresses(input) {
+  const arr = Array.isArray(input) ? input : []
+  const out = []
+  const seen = new Set()
+  for (const raw of arr) {
+    const normalized = normalizeAddressPayload(raw)
+    if (!normalized) continue
+    const id = String((raw && raw.id) || '').trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out.push({
+      id,
+      ...normalized,
+      phone: normalizePhone(raw && raw.phone),
+    })
+  }
+  return out
+}
+
+function extractOrderAddressSnapshot(input) {
+  const normalized = normalizeAddressPayload(input)
+  if (!normalized) return null
+  return {
+    label: normalized.label,
+    line1: normalized.line1,
+    line2: normalized.line2,
+    postalCode: normalized.postalCode,
+    city: normalized.city,
+    country: 'FR',
   }
 }
 
@@ -157,6 +247,18 @@ function dishConfigMap(dishConfigs) {
     m.set(cfg.dishId, cfg)
   }
   return m
+}
+
+function normalizeOrderItems(items) {
+  const arr = Array.isArray(items) ? items : []
+  const out = []
+  for (const it of arr) {
+    const dishId = String((it && it.dishId) || '').trim()
+    const qty = toSafeInt(it && it.qty, 0)
+    if (!dishId || qty <= 0) continue
+    out.push({ dishId, qty })
+  }
+  return out
 }
 
 async function listSales(limit = 20) {
@@ -193,6 +295,34 @@ exports.main = async (event) => {
     const code = err && err.code
     if (code === 'NOT_ADMIN') return fail('NOT_ADMIN', 'Not admin')
     return fail('NOT_ADMIN', 'Not admin')
+  }
+
+  if (action === 'getDeliveryRules') {
+    const cfg = await getOrCreateAdminConfig()
+    const deliveryMinByCity = normalizeDeliveryMinByCity(cfg && cfg.deliveryMinByCity)
+    const deliveryMinDefaultCents = toSafeInt(cfg && cfg.deliveryMinDefaultCents, 0)
+    return ok({
+      deliveryMinByCity,
+      deliveryMinDefaultCents: deliveryMinDefaultCents > 0 ? deliveryMinDefaultCents : 0,
+    })
+  }
+
+  if (action === 'updateDeliveryRules') {
+    const incomingMap = normalizeDeliveryMinByCity(event && event.deliveryMinByCity)
+    const defaultCentsRaw = toSafeInt(event && event.deliveryMinDefaultCents, 0)
+    const deliveryMinDefaultCents = defaultCentsRaw > 0 ? defaultCentsRaw : 0
+    const cfg = await getOrCreateAdminConfig()
+    const nextCfg = {
+      ...cfg,
+      deliveryMinByCity: incomingMap,
+      deliveryMinDefaultCents,
+      updatedAt: db.serverDate(),
+    }
+    delete nextCfg._id
+    await db.collection('adminConfig').doc('main').set({
+      data: nextCfg,
+    })
+    return ok({})
   }
 
   if (action === 'listDishes') {
@@ -291,7 +421,7 @@ exports.main = async (event) => {
       try {
         activeSale = await getSale(activeSaleId)
         const o = await db.collection('orders').where({ saleId: activeSaleId }).limit(500).get()
-        orderCount = (o.data || []).filter((x) => x.status === 'ACTIVE').length
+        orderCount = (o.data || []).filter((x) => x.status === ORDER_STATUS.ACTIVE).length
       } catch (err) {
         activeSale = null
       }
@@ -445,6 +575,13 @@ exports.main = async (event) => {
 
   if (action === 'openSale') {
     const { saleId } = event
+    const deferredOrderIds = Array.from(
+      new Set(
+        (Array.isArray(event.deferredOrderIds) ? event.deferredOrderIds : [])
+          .map((x) => String(x || '').trim())
+          .filter(Boolean)
+      )
+    )
     if (!saleId) return fail('BAD_REQUEST', 'Missing saleId')
     const sale = await getSale(saleId)
     if (!sale || sale.status !== 'DRAFT') return fail('BAD_REQUEST', 'Sale is not draft')
@@ -500,24 +637,167 @@ exports.main = async (event) => {
           return { blocked: true, activeSaleId: existingOpen._id }
         }
 
+        const deferredOrders = []
+        for (const orderId of deferredOrderIds) {
+          let order = null
+          try {
+            const got = await tx.collection('orders').doc(orderId).get()
+            order = got.data
+          } catch (err) {
+            order = null
+          }
+          if (!order) throwBiz('ORDER_NOT_FOUND', `待确认订单不存在: ${orderId}`)
+          if (order.status !== ORDER_STATUS.PENDING_REVIEW) throwBiz('ORDER_NOT_PENDING', `订单不是待确认状态: ${orderId}`)
+          deferredOrders.push(order)
+        }
+
+        const deferredDemand = new Map()
+        const deferredMissing = []
+        for (const order of deferredOrders) {
+          const items = normalizeOrderItems(order.items)
+          if (items.length === 0) throwBiz('BAD_REQUEST', `待确认订单无有效菜品: ${order._id}`)
+          for (const it of items) {
+            if (!draftSet.has(it.dishId)) {
+              const rawItem = (order.items || []).find((x) => x && x.dishId === it.dishId)
+              deferredMissing.push({
+                orderId: order._id,
+                dishId: it.dishId,
+                dishName: String((rawItem && rawItem.dishName) || ''),
+              })
+              continue
+            }
+            deferredDemand.set(it.dishId, (deferredDemand.get(it.dishId) || 0) + it.qty)
+          }
+        }
+        if (deferredMissing.length > 0) {
+          throwBiz('DEFERRED_ORDER_DISH_MISSING', '勾选的延后订单包含本次未售卖菜品', { items: deferredMissing })
+        }
+
+        const shortage = []
+        for (const cfgItem of draftConfigs) {
+          const needQty = toSafeInt(deferredDemand.get(cfgItem.dishId), 0)
+          if (needQty > cfgItem.limitQty) {
+            shortage.push({
+              dishId: cfgItem.dishId,
+              requiredQty: needQty,
+              limitQty: cfgItem.limitQty,
+              exceedBy: needQty - cfgItem.limitQty,
+            })
+          }
+        }
+        if (shortage.length > 0) {
+          throwBiz('DEFERRED_ORDER_STOCK_EXCEED', '勾选的延后订单库存需求超过本次开单总量', { items: shortage })
+        }
+
+        const openedConfigs = draftConfigs.map((cfgItem) => {
+          const soldQty = toSafeInt(deferredDemand.get(cfgItem.dishId), 0)
+          return {
+            dishId: cfgItem.dishId,
+            limitQty: cfgItem.limitQty,
+            soldQty: Math.max(0, Math.min(cfgItem.limitQty, soldQty)),
+          }
+        })
+
         await cfgRef.update({ data: { activeSaleId: saleId, updatedAt: db.serverDate() } })
         await tx.collection('sales').doc(saleId).update({
           data: {
             status: 'OPEN',
             dishIds: draftConfigs.map((x) => x.dishId),
-            dishConfigs: draftConfigs.map((x) => ({ dishId: x.dishId, limitQty: x.limitQty, soldQty: 0 })),
+            dishConfigs: openedConfigs,
             saleConfigVersion: 1,
             openedAt: db.serverDate(),
             updatedAt: db.serverDate(),
           },
         })
-        return { blocked: false }
+
+        const seenTargetOrderIds = new Set()
+        for (const order of deferredOrders) {
+          const targetOrderId = buildOrderId(saleId, order.customerOpenId)
+          if (seenTargetOrderIds.has(targetOrderId)) {
+            throwBiz('DEFERRED_ORDER_DUPLICATE_CUSTOMER', '勾选的延后订单存在同一顾客重复订单')
+          }
+          seenTargetOrderIds.add(targetOrderId)
+
+          if (targetOrderId !== order._id) {
+            let existingTarget = null
+            try {
+              const got = await tx.collection('orders').doc(targetOrderId).get()
+              existingTarget = got.data
+            } catch (err) {
+              existingTarget = null
+            }
+            if (existingTarget) {
+              throwBiz('DEFERRED_ORDER_TARGET_EXISTS', `目标订单已存在，无法迁移: ${targetOrderId}`)
+            }
+          }
+        }
+
+        for (const order of deferredOrders) {
+          const targetOrderId = buildOrderId(saleId, order.customerOpenId)
+          const now = db.serverDate()
+          const nextData = {
+            ...order,
+            saleId,
+            status: ORDER_STATUS.ACTIVE,
+            deliveryTimeSlotLabelSnapshot:
+              order.fulfillmentType === 'delivery' ? String(sale.deliveryTimeSlotLabel || '').trim() : null,
+            acceptDeliverySlot: order.fulfillmentType === 'delivery' ? true : false,
+            saleConfigVersionSnapshot: 1,
+            approvedAt: now,
+            updatedAt: now,
+          }
+          delete nextData._id
+          delete nextData.pendingReason
+          delete nextData.pendingDetail
+          delete nextData.pendingAt
+          delete nextData.rejectedAt
+          delete nextData.rejectedByOpenId
+          delete nextData.rejectedReason
+          delete nextData.cancelledAt
+          delete nextData.cancelledByOpenId
+
+          if (targetOrderId === order._id) {
+            await tx.collection('orders').doc(order._id).update({
+              data: {
+                saleId: nextData.saleId,
+                status: nextData.status,
+                deliveryTimeSlotLabelSnapshot: nextData.deliveryTimeSlotLabelSnapshot,
+                acceptDeliverySlot: nextData.acceptDeliverySlot,
+                saleConfigVersionSnapshot: nextData.saleConfigVersionSnapshot,
+                pendingReason: _.remove,
+                pendingDetail: _.remove,
+                pendingAt: _.remove,
+                approvedAt: now,
+                updatedAt: now,
+                rejectedAt: _.remove,
+                rejectedByOpenId: _.remove,
+                rejectedReason: _.remove,
+                cancelledAt: _.remove,
+                cancelledByOpenId: _.remove,
+              },
+            })
+          } else {
+            await tx.collection('orders').doc(targetOrderId).set({ data: nextData })
+            await tx.collection('orders').doc(order._id).remove()
+          }
+          await tx.collection('orderAuditLogs').add({
+            data: {
+              orderId: targetOrderId,
+              action: 'DEFERRED_APPROVE_ON_OPEN',
+              byOpenId: openId,
+              at: now,
+            },
+          })
+        }
+
+        return { blocked: false, deferredApprovedCount: deferredOrders.length }
       })
       if (txRes && txRes.blocked) return fail('ACTIVE_SALE_EXISTS', '已有开单中开单，请先截单', { activeSaleId: txRes.activeSaleId })
+      return ok({ deferredApprovedCount: toSafeInt(txRes && txRes.deferredApprovedCount, 0) })
     } catch (err) {
+      if (err && err.code) return fail(err.code, err.message || 'Open sale failed', err.detail)
       return fail('TX_FAILED', 'Open sale failed', String(err && err.message))
     }
-    return ok({})
   }
 
   if (action === 'closeSale') {
@@ -542,14 +822,372 @@ exports.main = async (event) => {
     return ok({})
   }
 
+  if (action === 'listPendingOrders') {
+    const saleId = String(event.saleId || '').trim()
+    const where = { status: ORDER_STATUS.PENDING_REVIEW }
+    if (saleId) where.saleId = saleId
+    const r = await db.collection('orders').where(where).limit(200).get()
+    return ok({ orders: r.data || [] })
+  }
+
+  if (action === 'approvePendingOrderNow') {
+    const orderId = String(event.orderId || '').trim()
+    if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
+    const slotLabelInput = String(event.deliveryTimeSlotLabel || '').trim()
+    try {
+      await db.runTransaction(async (tx) => {
+        let order
+        try {
+          const got = await tx.collection('orders').doc(orderId).get()
+          order = got.data
+        } catch (err) {
+          throwBiz('ORDER_NOT_FOUND', 'Order not found')
+        }
+        if (!order) throwBiz('ORDER_NOT_FOUND', 'Order not found')
+        if (order.status !== ORDER_STATUS.PENDING_REVIEW) throwBiz('ORDER_NOT_PENDING', 'Order is not pending')
+        if (!order.saleId) throwBiz('BAD_REQUEST', 'Order sale missing')
+
+        let sale = null
+        try {
+          const saleGet = await tx.collection('sales').doc(order.saleId).get()
+          sale = saleGet.data
+        } catch (err) {
+          sale = null
+        }
+        if (!sale || sale.status !== 'OPEN') throwBiz('ORDER_LOCKED', '当前无法立即确认，请在下次开单时勾选延后确认')
+
+        const normalizedConfigs = normalizeDishConfigs(sale.dishConfigs)
+        if (normalizedConfigs.length === 0) throwBiz('SALE_CONFIG_INVALID', 'Sale has no dishConfigs')
+        const cfgMap = dishConfigMap(normalizedConfigs)
+        const outOfStock = []
+        const orderItems = normalizeOrderItems(order.items)
+        if (orderItems.length === 0) throwBiz('BAD_REQUEST', 'Order has no items')
+        for (const it of orderItems) {
+          const cfgItem = cfgMap.get(it.dishId)
+          if (!cfgItem) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
+          const remain = Math.max(0, toSafeInt(cfgItem.limitQty, 0) - toSafeInt(cfgItem.soldQty, 0))
+          if (it.qty > remain) {
+            outOfStock.push({
+              dishId: it.dishId,
+              requiredQty: it.qty,
+              remainingQty: remain,
+            })
+          }
+        }
+        if (outOfStock.length > 0) throwBiz('OUT_OF_STOCK', 'Out of stock', { items: outOfStock })
+
+        for (const it of orderItems) {
+          const cfgItem = cfgMap.get(it.dishId)
+          cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) + it.qty)
+          cfgMap.set(it.dishId, cfgItem)
+        }
+        const nextConfigs = normalizedConfigs.map((x) => {
+          const cur = cfgMap.get(x.dishId)
+          return cur ? { dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty } : x
+        })
+        await tx.collection('sales').doc(order.saleId).update({
+          data: {
+            dishConfigs: nextConfigs,
+            updatedAt: db.serverDate(),
+          },
+        })
+
+        let deliveryTimeSlotLabelSnapshot = order.deliveryTimeSlotLabelSnapshot || null
+        if (order.fulfillmentType === 'delivery') {
+          deliveryTimeSlotLabelSnapshot = slotLabelInput || String(sale.deliveryTimeSlotLabel || '').trim()
+          if (!deliveryTimeSlotLabelSnapshot) throwBiz('BAD_REQUEST', 'Missing delivery slot')
+        }
+
+        const now = db.serverDate()
+        await tx.collection('orders').doc(orderId).update({
+          data: {
+            status: ORDER_STATUS.ACTIVE,
+            deliveryTimeSlotLabelSnapshot,
+            pendingReason: _.remove,
+            pendingDetail: _.remove,
+            pendingAt: _.remove,
+            approvedAt: now,
+            saleConfigVersionSnapshot: toSafeInt(sale.saleConfigVersion, 0),
+            updatedAt: now,
+          },
+        })
+        await tx.collection('orderAuditLogs').add({
+          data: {
+            orderId,
+            action: 'ADMIN_APPROVE_PENDING',
+            byOpenId: openId,
+            at: now,
+          },
+        })
+      })
+    } catch (err) {
+      if (err && err.code) return fail(err.code, err.message || 'Approve failed', err.detail)
+      return fail('TX_FAILED', 'Approve failed', String(err && err.message))
+    }
+    return ok({})
+  }
+
+  if (action === 'rejectPendingOrder') {
+    const orderId = String(event.orderId || '').trim()
+    if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
+    const rejectedReason = String(event.rejectedReason || '').trim().slice(0, 200)
+    try {
+      await db.runTransaction(async (tx) => {
+        let order = null
+        try {
+          const got = await tx.collection('orders').doc(orderId).get()
+          order = got.data
+        } catch (err) {
+          order = null
+        }
+        if (!order) throwBiz('ORDER_NOT_FOUND', 'Order not found')
+        if (order.status !== ORDER_STATUS.PENDING_REVIEW) throwBiz('ORDER_NOT_PENDING', 'Order is not pending')
+
+        const now = db.serverDate()
+        await tx.collection('orders').doc(orderId).update({
+          data: {
+            status: ORDER_STATUS.REJECTED,
+            rejectedReason,
+            rejectedAt: now,
+            rejectedByOpenId: openId,
+            pendingReason: _.remove,
+            pendingDetail: _.remove,
+            pendingAt: _.remove,
+            updatedAt: now,
+          },
+        })
+        await tx.collection('orderAuditLogs').add({
+          data: {
+            orderId,
+            action: 'ADMIN_REJECT_PENDING',
+            byOpenId: openId,
+            at: now,
+          },
+        })
+      })
+    } catch (err) {
+      if (err && err.code) return fail(err.code, err.message || 'Reject failed', err.detail)
+      return fail('TX_FAILED', 'Reject failed', String(err && err.message))
+    }
+    return ok({})
+  }
+
+  if (action === 'updateOrderDeliverySlot') {
+    const orderId = String(event.orderId || '').trim()
+    if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
+    let slotLabel = String(event.deliveryTimeSlotLabel || '').trim()
+    if (!slotLabel) {
+      const slot = parseAndValidateDeliverySlot(event)
+      if (!slot.ok) return fail('BAD_REQUEST', slot.message)
+      slotLabel = slot.deliveryTimeSlotLabel
+    }
+    try {
+      const r = await db.collection('orders').doc(orderId).get()
+      const order = r.data
+      if (!order) return fail('ORDER_NOT_FOUND', 'Order not found')
+      if (order.fulfillmentType !== 'delivery') return fail('BAD_REQUEST', 'Only delivery order can update slot')
+      if (order.status !== ORDER_STATUS.ACTIVE && order.status !== ORDER_STATUS.PENDING_REVIEW) {
+        return fail('ORDER_NOT_EDITABLE', 'Order is not editable')
+      }
+      const now = db.serverDate()
+      await db.collection('orders').doc(orderId).update({
+        data: {
+          deliveryTimeSlotLabelSnapshot: slotLabel,
+          updatedAt: now,
+        },
+      })
+      await db.collection('orderAuditLogs').add({
+        data: {
+          orderId,
+          action: 'ADMIN_UPDATE_SLOT',
+          byOpenId: openId,
+          at: now,
+        },
+      })
+    } catch (err) {
+      return fail('TX_FAILED', 'Update delivery slot failed', String(err && err.message))
+    }
+    return ok({})
+  }
+
+  if (action === 'updateOrderFulfillment') {
+    const orderId = String(event.orderId || '').trim()
+    const fulfillmentType = String(event.fulfillmentType || '').trim()
+    const requestedAddressId = String(event.addressId || '').trim()
+    const hasManualAddressInput = !!(event && event.address)
+    const hasPhoneInput = Object.prototype.hasOwnProperty.call(event || {}, 'phone')
+    const requestedPhone = hasPhoneInput ? normalizePhone(event.phone) : ''
+    const requestedManualAddress = event && event.address ? normalizeAddressPayload(event.address) : null
+    if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
+    if (fulfillmentType !== 'delivery' && fulfillmentType !== 'pickup') return fail('BAD_REQUEST', 'Invalid fulfillmentType')
+    if (hasManualAddressInput && !requestedManualAddress) return fail('INVALID_ADDRESS', '手动地址格式不正确')
+    let slotLabel = String(event.deliveryTimeSlotLabel || '').trim()
+    if (!slotLabel && fulfillmentType === 'delivery') {
+      const slot = parseAndValidateDeliverySlot(event)
+      if (slot.ok) slotLabel = slot.deliveryTimeSlotLabel
+    }
+    try {
+      const r = await db.collection('orders').doc(orderId).get()
+      const order = r.data
+      if (!order) return fail('ORDER_NOT_FOUND', 'Order not found')
+      if (order.status !== ORDER_STATUS.ACTIVE && order.status !== ORDER_STATUS.PENDING_REVIEW) {
+        return fail('ORDER_NOT_EDITABLE', 'Order is not editable')
+      }
+
+      let customerAddresses = []
+      if (order.customerOpenId) {
+        try {
+          const customerRes = await db.collection('customers').doc(order.customerOpenId).get()
+          customerAddresses = normalizeStoredAddresses(customerRes && customerRes.data && customerRes.data.addresses)
+        } catch (err) {
+          customerAddresses = []
+        }
+      }
+
+      const currentPhone = normalizePhone(order.contact && order.contact.phone)
+      const nextData = {
+        fulfillmentType,
+        contact: {
+          phone: hasPhoneInput ? requestedPhone : currentPhone,
+        },
+        updatedAt: db.serverDate(),
+      }
+      let addressSource = 'unchanged'
+
+      if (fulfillmentType === 'delivery') {
+        let nextAddress = null
+        let nextAddressId = null
+
+        const selectedSaved = requestedAddressId ? customerAddresses.find((x) => x.id === requestedAddressId) || null : null
+        if (requestedAddressId && !selectedSaved) return fail('BAD_REQUEST', '所选客户地址不存在')
+        if (selectedSaved) {
+          nextAddress = {
+            label: selectedSaved.label,
+            line1: selectedSaved.line1,
+            line2: selectedSaved.line2,
+            postalCode: selectedSaved.postalCode,
+            city: selectedSaved.city,
+            country: 'FR',
+          }
+          nextAddressId = selectedSaved.id
+          addressSource = 'addressId'
+          if (!nextData.contact.phone && isPhoneValid(selectedSaved.phone)) nextData.contact.phone = selectedSaved.phone
+        } else if (requestedManualAddress) {
+          nextAddress = {
+            label: requestedManualAddress.label,
+            line1: requestedManualAddress.line1,
+            line2: requestedManualAddress.line2,
+            postalCode: requestedManualAddress.postalCode,
+            city: requestedManualAddress.city,
+            country: 'FR',
+          }
+          nextAddressId = null
+          addressSource = 'manual'
+        } else {
+          const existingAddress = extractOrderAddressSnapshot(order.address)
+          if (existingAddress) {
+            nextAddress = existingAddress
+            const oldAddressId = String(order.addressId || '').trim()
+            nextAddressId = oldAddressId || null
+          }
+        }
+        if (!nextAddress) return fail('BAD_REQUEST', '配送订单缺少有效地址')
+        if (!isPhoneValid(nextData.contact.phone)) return fail('INVALID_PHONE', '请填写有效电话')
+        nextData.address = nextAddress
+        nextData.addressId = nextAddressId
+
+        if (!slotLabel) slotLabel = String(order.deliveryTimeSlotLabelSnapshot || '').trim()
+        if (!slotLabel && order.saleId) {
+          try {
+            const saleRes = await db.collection('sales').doc(order.saleId).get()
+            const sale = saleRes.data
+            slotLabel = String((sale && sale.deliveryTimeSlotLabel) || '').trim()
+          } catch (err) {
+            slotLabel = ''
+          }
+        }
+        if (!slotLabel) return fail('BAD_REQUEST', '配送需要时间段')
+        nextData.deliveryTimeSlotLabelSnapshot = slotLabel
+        nextData.acceptDeliverySlot = true
+      } else {
+        if (hasPhoneInput && requestedPhone && !isPhoneValid(requestedPhone)) return fail('INVALID_PHONE', '请填写有效电话')
+        nextData.address = null
+        nextData.addressId = null
+        nextData.deliveryTimeSlotLabelSnapshot = null
+        nextData.acceptDeliverySlot = false
+      }
+
+      await db.collection('orders').doc(orderId).update({ data: nextData })
+      await db.collection('orderAuditLogs').add({
+        data: {
+          orderId,
+          action: 'ADMIN_UPDATE_FULFILLMENT',
+          byOpenId: openId,
+          at: db.serverDate(),
+          detail: {
+            from: String(order.fulfillmentType || ''),
+            to: fulfillmentType,
+            addressSource,
+            phoneChanged: nextData.contact.phone !== currentPhone,
+          },
+        },
+      })
+    } catch (err) {
+      return fail('TX_FAILED', 'Update fulfillment failed', String(err && err.message))
+    }
+    return ok({})
+  }
+
   if (action === 'listOrders') {
     const saleId = event.saleId
     if (!saleId) return fail('BAD_REQUEST', 'Missing saleId')
     const fulfillmentType = event.fulfillmentType
+    const status = String(event.status || '').trim()
     const where = { saleId }
     if (fulfillmentType === 'delivery' || fulfillmentType === 'pickup') where.fulfillmentType = fulfillmentType
+    if (
+      status === ORDER_STATUS.ACTIVE ||
+      status === ORDER_STATUS.CANCELLED ||
+      status === ORDER_STATUS.PENDING_REVIEW ||
+      status === ORDER_STATUS.REJECTED
+    ) {
+      where.status = status
+    }
     const r = await db.collection('orders').where(where).limit(200).get()
-    return ok({ orders: r.data || [] })
+    const orders = r.data || []
+    const openIds = Array.from(
+      new Set(
+        orders
+          .map((o) => String((o && o.customerOpenId) || '').trim())
+          .filter(Boolean)
+      )
+    )
+    const nicknameByOpenId = {}
+    const chunkSize = 50
+    for (let i = 0; i < openIds.length; i += chunkSize) {
+      const chunk = openIds.slice(i, i + chunkSize)
+      try {
+        const customerRes = await db
+          .collection('customers')
+          .where({ _id: _.in(chunk) })
+          .get()
+        for (const c of customerRes.data || []) {
+          const id = String((c && c._id) || '').trim()
+          if (!id) continue
+          nicknameByOpenId[id] = String((c && c.nickname) || '').trim()
+        }
+      } catch (err) {
+        // Ignore missing/invalid customers collection and fallback to anonymous display.
+      }
+    }
+    const withCustomer = orders.map((o) => {
+      const id = String((o && o.customerOpenId) || '').trim()
+      return {
+        ...o,
+        customerNickname: nicknameByOpenId[id] || '',
+      }
+    })
+    return ok({ orders: withCustomer })
   }
 
   if (action === 'getOrderDetail') {
@@ -557,7 +1195,18 @@ exports.main = async (event) => {
     if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
     try {
       const r = await db.collection('orders').doc(orderId).get()
-      return ok({ order: r.data })
+      const order = r.data || null
+      if (!order) return fail('ORDER_NOT_FOUND', 'Order not found')
+      let customerAddresses = []
+      if (order.customerOpenId) {
+        try {
+          const customerRes = await db.collection('customers').doc(order.customerOpenId).get()
+          customerAddresses = normalizeStoredAddresses(customerRes && customerRes.data && customerRes.data.addresses)
+        } catch (err) {
+          customerAddresses = []
+        }
+      }
+      return ok({ order, customerAddresses })
     } catch (err) {
       return fail('ORDER_NOT_FOUND', 'Order not found')
     }
@@ -578,7 +1227,9 @@ exports.main = async (event) => {
           throwBiz('ORDER_NOT_FOUND', 'Order not found')
         }
         if (!order) throwBiz('ORDER_NOT_FOUND', 'Order not found')
-        if (order.status !== 'ACTIVE') throwBiz('ORDER_NOT_EDITABLE', 'Order is not editable')
+        if (order.status !== ORDER_STATUS.ACTIVE && order.status !== ORDER_STATUS.PENDING_REVIEW) {
+          throwBiz('ORDER_NOT_EDITABLE', 'Order is not editable')
+        }
 
         const oldItems = Array.isArray(order.items) ? order.items : []
         if (oldItems.length === 0) throwBiz('BAD_REQUEST', 'Order has no editable items')
@@ -621,7 +1272,7 @@ exports.main = async (event) => {
 
         const expandedLimits = []
         let saleVersionSnapshot = toSafeInt(order.saleConfigVersionSnapshot, 0)
-        if (order.saleId) {
+        if (order.status === ORDER_STATUS.ACTIVE && order.saleId) {
           let sale = null
           try {
             const saleGet = await tx.collection('sales').doc(order.saleId).get()
@@ -678,7 +1329,7 @@ exports.main = async (event) => {
         await tx.collection('orderAuditLogs').add({
           data: {
             orderId,
-            action: 'ADMIN_UPDATE_ITEMS',
+            action: order.status === ORDER_STATUS.ACTIVE ? 'ADMIN_UPDATE_ITEMS' : 'ADMIN_UPDATE_PENDING_ITEMS',
             byOpenId: openId,
             at: now,
           },
@@ -706,14 +1357,14 @@ exports.main = async (event) => {
           throw Object.assign(new Error('ORDER_NOT_FOUND'), { code: 'ORDER_NOT_FOUND' })
         }
         if (!order) throw Object.assign(new Error('ORDER_NOT_FOUND'), { code: 'ORDER_NOT_FOUND' })
-        if (order.status === 'CANCELLED') return { alreadyCancelled: true }
+        if (order.status === ORDER_STATUS.CANCELLED || order.status === ORDER_STATUS.REJECTED) return { alreadyCancelled: true }
 
         const now = db.serverDate()
         await tx.collection('orders').doc(orderId).update({
-          data: { status: 'CANCELLED', cancelledAt: now, cancelledByOpenId: openId, updatedAt: now },
+          data: { status: ORDER_STATUS.CANCELLED, cancelledAt: now, cancelledByOpenId: openId, updatedAt: now },
         })
 
-        if (order.saleId) {
+        if (order.status === ORDER_STATUS.ACTIVE && order.saleId) {
           let sale = null
           try {
             const saleGet = await tx.collection('sales').doc(order.saleId).get()
@@ -770,7 +1421,7 @@ exports.main = async (event) => {
     if (!sale) return fail('NOT_FOUND', 'Sale not found')
 
     const where = { saleId }
-    if (!includeCancelled) where.status = 'ACTIVE'
+    if (!includeCancelled) where.status = ORDER_STATUS.ACTIVE
     const orderRes = await db.collection('orders').where(where).limit(500).get()
     const orders = orderRes.data || []
     orders.sort((a, b) => {

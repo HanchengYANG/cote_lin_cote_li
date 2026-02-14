@@ -7,6 +7,13 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 
+const ORDER_STATUS = {
+  ACTIVE: 'ACTIVE',
+  CANCELLED: 'CANCELLED',
+  PENDING_REVIEW: 'PENDING_REVIEW',
+  REJECTED: 'REJECTED',
+}
+
 function ok(data) {
   return { ok: true, data }
 }
@@ -15,8 +22,8 @@ function fail(code, message, detail) {
   return { ok: false, code, message, detail }
 }
 
-function buildOrderId(saleId, openId) {
-  return crypto.createHash('md5').update(`${String(saleId || '')}:${String(openId || '')}`).digest('hex')
+function buildAddressId() {
+  return `addr_${Date.now().toString(36)}_${crypto.randomBytes(3).toString('hex')}`
 }
 
 async function getOrCreateAdminConfig() {
@@ -55,6 +62,31 @@ function toSafeInt(v, fallback = 0) {
   const n = Number(v)
   if (!Number.isFinite(n)) return fallback
   return Math.floor(n)
+}
+
+function toTimeMs(v) {
+  if (!v) return 0
+  const d = new Date(v)
+  const t = d.getTime()
+  return Number.isFinite(t) ? t : 0
+}
+
+function pickLatestOrder(orders) {
+  const arr = Array.isArray(orders) ? orders.filter(Boolean) : []
+  if (arr.length <= 1) return arr[0] || null
+  arr.sort((a, b) => {
+    const ta = toTimeMs(a && (a.updatedAt || a.createdAt))
+    const tb = toTimeMs(b && (b.updatedAt || b.createdAt))
+    return tb - ta
+  })
+  return arr[0] || null
+}
+
+function normalizeCityKey(city) {
+  return String(city || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
 }
 
 function normalizeSaleDishConfigs(sale) {
@@ -133,11 +165,147 @@ function isAddressValid(addr) {
   const line1 = String(addr.line1 || '').trim()
   const postalCode = String(addr.postalCode || '').trim()
   const city = String(addr.city || '').trim()
+  const phone = normalizePhone(addr.phone || '')
   const country = String(addr.country || 'FR').trim().toUpperCase()
   if (!line1 || !city) return false
   if (!/^\d{5}$/.test(postalCode)) return false
+  if (!isPhoneValid(phone)) return false
   if (country !== 'FR') return false
   return true
+}
+
+function normalizeAddressPayload(input, options = {}) {
+  const source = input || {}
+  const line1 = String(source.line1 || '').trim()
+  const line2 = String(source.line2 || '').trim()
+  const postalCode = String(source.postalCode || '').trim()
+  const city = String(source.city || '').trim()
+  const phone = normalizePhone(source.phone || '')
+  const country = String(source.country || 'FR')
+    .trim()
+    .toUpperCase()
+  const labelRaw = String(source.label || '').trim()
+  const label = labelRaw || `${line1} ${city}`.trim()
+  const out = {
+    label: label.slice(0, 40),
+    line1,
+    line2,
+    postalCode,
+    city,
+    phone,
+    country: country || 'FR',
+  }
+  if (!isAddressValid(out)) return null
+  if (options.requireLabel && !out.label) return null
+  return out
+}
+
+function normalizeStoredAddresses(input) {
+  const arr = Array.isArray(input) ? input : []
+  const seen = new Set()
+  const out = []
+  for (const raw of arr) {
+    const normalized = normalizeAddressPayload(raw, { requireLabel: true })
+    if (!normalized) continue
+    const id = String((raw && raw.id) || '').trim() || buildAddressId()
+    if (seen.has(id)) continue
+    seen.add(id)
+    out.push({
+      id,
+      ...normalized,
+      createdAtMs: toSafeInt(raw && raw.createdAtMs, Date.now()),
+      updatedAtMs: toSafeInt(raw && raw.updatedAtMs, Date.now()),
+    })
+  }
+  return out
+}
+
+function sanitizeProfileNickname(input) {
+  return String(input || '').trim().slice(0, 40)
+}
+
+function toProfileOutput(doc) {
+  const nickname = sanitizeProfileNickname(doc && doc.nickname)
+  const addresses = normalizeStoredAddresses(doc && doc.addresses)
+  let defaultAddressId = String((doc && doc.defaultAddressId) || '').trim()
+  if (!addresses.some((a) => a.id === defaultAddressId)) {
+    defaultAddressId = addresses[0] ? addresses[0].id : ''
+  }
+  return {
+    nickname,
+    defaultAddressId,
+    addresses,
+    isComplete: !!nickname && addresses.length > 0,
+  }
+}
+
+function toProfileSummary(doc) {
+  const profile = toProfileOutput(doc)
+  return {
+    nickname: profile.nickname,
+    defaultAddressId: profile.defaultAddressId,
+    addressCount: profile.addresses.length,
+    isComplete: profile.isComplete,
+  }
+}
+
+async function getCustomerDoc(openId) {
+  try {
+    const r = await db.collection('customers').doc(openId).get()
+    return r.data
+  } catch (err) {
+    return null
+  }
+}
+
+async function ensureCustomerDoc(openId) {
+  const existing = await getCustomerDoc(openId)
+  if (existing) return existing
+  const now = db.serverDate()
+  await db.collection('customers').doc(openId).set({
+    data: {
+      nickname: '',
+      defaultAddressId: '',
+      addresses: [],
+      createdAt: now,
+      updatedAt: now,
+    },
+  })
+  return getCustomerDoc(openId)
+}
+
+function buildDeliveryMinRule(config) {
+  const raw = config && typeof config.deliveryMinByCity === 'object' && config.deliveryMinByCity ? config.deliveryMinByCity : {}
+  const cityMinMap = new Map()
+  for (const key of Object.keys(raw)) {
+    const minOrderCents = toSafeInt(raw[key], NaN)
+    if (!Number.isFinite(minOrderCents) || minOrderCents <= 0) continue
+    cityMinMap.set(normalizeCityKey(key), minOrderCents)
+  }
+  const defaultMinOrderCents = toSafeInt(config && config.deliveryMinDefaultCents, NaN)
+  return {
+    cityMinMap,
+    defaultMinOrderCents: Number.isFinite(defaultMinOrderCents) && defaultMinOrderCents > 0 ? defaultMinOrderCents : null,
+  }
+}
+
+function attachMinOrderInfo(profile, deliveryRule) {
+  const p = profile || { nickname: '', defaultAddressId: '', addresses: [], isComplete: false }
+  const rule = deliveryRule || { cityMinMap: new Map(), defaultMinOrderCents: null }
+  const addresses = (p.addresses || []).map((a) => {
+    const cityKey = normalizeCityKey(a.city)
+    let minOrderCents = 0
+    if (rule.cityMinMap.has(cityKey)) {
+      minOrderCents = toSafeInt(rule.cityMinMap.get(cityKey), 0)
+    } else if (rule.defaultMinOrderCents) {
+      minOrderCents = rule.defaultMinOrderCents
+    }
+    return {
+      ...a,
+      minOrderCents,
+    }
+  })
+  return { ...p, addresses }
 }
 
 function httpGetJson(url) {
@@ -203,6 +371,257 @@ exports.main = async (event) => {
   const wxContext = cloud.getWXContext()
   const openId = wxContext.OPENID
 
+  if (action === 'getMyProfile') {
+    const doc = await ensureCustomerDoc(openId)
+    const cfg = await getOrCreateAdminConfig()
+    return ok({ profile: attachMinOrderInfo(toProfileOutput(doc), buildDeliveryMinRule(cfg)) })
+  }
+
+  if (action === 'completeMyProfile') {
+    const nickname = sanitizeProfileNickname(event.nickname)
+    const address = normalizeAddressPayload(event.address, { requireLabel: true })
+    if (!nickname) return fail('BAD_REQUEST', '缺少昵称')
+    if (!address) return fail('INVALID_ADDRESS', '地址格式不正确')
+    let profile = null
+    try {
+      profile = await db.runTransaction(async (tx) => {
+        let customer = null
+        try {
+          const got = await tx.collection('customers').doc(openId).get()
+          customer = got.data
+        } catch (err) {
+          customer = null
+        }
+        const oldAddresses = normalizeStoredAddresses(customer && customer.addresses)
+        const nowMs = Date.now()
+        let addresses = oldAddresses
+        let matched = oldAddresses.find((x) => {
+          return x.line1 === address.line1 && x.line2 === address.line2 && x.postalCode === address.postalCode && x.city === address.city
+        })
+        if (!matched) {
+          matched = {
+            id: buildAddressId(),
+            ...address,
+            createdAtMs: nowMs,
+            updatedAtMs: nowMs,
+          }
+          addresses = oldAddresses.concat([matched])
+        } else {
+          addresses = oldAddresses.map((x) => {
+            if (x.id !== matched.id) return x
+            return {
+              ...x,
+              ...address,
+              updatedAtMs: nowMs,
+            }
+          })
+          matched = addresses.find((x) => x.id === matched.id) || matched
+        }
+        const defaultAddressId = matched.id
+        const saveData = {
+          nickname,
+          addresses,
+          defaultAddressId,
+          updatedAt: db.serverDate(),
+        }
+        if (customer) {
+          await tx.collection('customers').doc(openId).update({ data: saveData })
+        } else {
+          await tx.collection('customers').doc(openId).set({
+            data: {
+              ...saveData,
+              createdAt: db.serverDate(),
+            },
+          })
+        }
+        return toProfileOutput({ nickname, addresses, defaultAddressId })
+      })
+    } catch (err) {
+      return fail('TX_FAILED', '保存资料失败', String(err && err.message))
+    }
+    const cfg = await getOrCreateAdminConfig()
+    return ok({ profile: attachMinOrderInfo(profile, buildDeliveryMinRule(cfg)) })
+  }
+
+  if (action === 'addMyAddress') {
+    const address = normalizeAddressPayload(event.address, { requireLabel: true })
+    if (!address) return fail('INVALID_ADDRESS', '地址格式不正确')
+    const setDefault = !!event.setDefault
+    let profile = null
+    try {
+      profile = await db.runTransaction(async (tx) => {
+        let customer = null
+        try {
+          const got = await tx.collection('customers').doc(openId).get()
+          customer = got.data
+        } catch (err) {
+          customer = null
+        }
+        const nickname = sanitizeProfileNickname(customer && customer.nickname)
+        const oldAddresses = normalizeStoredAddresses(customer && customer.addresses)
+        const nowMs = Date.now()
+        const newAddr = {
+          id: buildAddressId(),
+          ...address,
+          createdAtMs: nowMs,
+          updatedAtMs: nowMs,
+        }
+        const addresses = oldAddresses.concat([newAddr])
+        let defaultAddressId = String((customer && customer.defaultAddressId) || '').trim()
+        if (!addresses.some((x) => x.id === defaultAddressId)) defaultAddressId = ''
+        if (setDefault || !defaultAddressId) defaultAddressId = newAddr.id
+        const saveData = {
+          nickname,
+          addresses,
+          defaultAddressId,
+          updatedAt: db.serverDate(),
+        }
+        if (customer) {
+          await tx.collection('customers').doc(openId).update({ data: saveData })
+        } else {
+          await tx.collection('customers').doc(openId).set({
+            data: {
+              ...saveData,
+              createdAt: db.serverDate(),
+            },
+          })
+        }
+        return toProfileOutput({ nickname, addresses, defaultAddressId })
+      })
+    } catch (err) {
+      return fail('TX_FAILED', '保存地址失败', String(err && err.message))
+    }
+    const cfg = await getOrCreateAdminConfig()
+    return ok({ profile: attachMinOrderInfo(profile, buildDeliveryMinRule(cfg)) })
+  }
+
+  if (action === 'updateMyAddress') {
+    const addressId = String(event.addressId || '').trim()
+    const address = normalizeAddressPayload(event.address, { requireLabel: true })
+    if (!addressId) return fail('BAD_REQUEST', '缺少 addressId')
+    if (!address) return fail('INVALID_ADDRESS', '地址格式不正确')
+    const setDefault = !!event.setDefault
+    let profile = null
+    try {
+      profile = await db.runTransaction(async (tx) => {
+        let customer = null
+        try {
+          const got = await tx.collection('customers').doc(openId).get()
+          customer = got.data
+        } catch (err) {
+          customer = null
+        }
+        if (!customer) throwBiz('BAD_REQUEST', '请先完善资料')
+        const nickname = sanitizeProfileNickname(customer.nickname)
+        const oldAddresses = normalizeStoredAddresses(customer.addresses)
+        let found = false
+        const nowMs = Date.now()
+        const addresses = oldAddresses.map((x) => {
+          if (x.id !== addressId) return x
+          found = true
+          return {
+            ...x,
+            ...address,
+            updatedAtMs: nowMs,
+          }
+        })
+        if (!found) throwBiz('ADDRESS_NOT_FOUND', '地址不存在')
+        let defaultAddressId = String(customer.defaultAddressId || '').trim()
+        if (!addresses.some((x) => x.id === defaultAddressId)) defaultAddressId = addresses[0] ? addresses[0].id : ''
+        if (setDefault) defaultAddressId = addressId
+        await tx.collection('customers').doc(openId).update({
+          data: {
+            nickname,
+            addresses,
+            defaultAddressId,
+            updatedAt: db.serverDate(),
+          },
+        })
+        return toProfileOutput({ nickname, addresses, defaultAddressId })
+      })
+    } catch (err) {
+      if (err && err.code) return fail(err.code, err.message || '保存地址失败', err.detail)
+      return fail('TX_FAILED', '保存地址失败', String(err && err.message))
+    }
+    const cfg = await getOrCreateAdminConfig()
+    return ok({ profile: attachMinOrderInfo(profile, buildDeliveryMinRule(cfg)) })
+  }
+
+  if (action === 'deleteMyAddress') {
+    const addressId = String(event.addressId || '').trim()
+    if (!addressId) return fail('BAD_REQUEST', '缺少 addressId')
+    let profile = null
+    try {
+      profile = await db.runTransaction(async (tx) => {
+        let customer = null
+        try {
+          const got = await tx.collection('customers').doc(openId).get()
+          customer = got.data
+        } catch (err) {
+          customer = null
+        }
+        if (!customer) throwBiz('BAD_REQUEST', '请先完善资料')
+        const nickname = sanitizeProfileNickname(customer.nickname)
+        const oldAddresses = normalizeStoredAddresses(customer.addresses)
+        const addresses = oldAddresses.filter((x) => x.id !== addressId)
+        if (addresses.length === oldAddresses.length) throwBiz('ADDRESS_NOT_FOUND', '地址不存在')
+        let defaultAddressId = String(customer.defaultAddressId || '').trim()
+        if (defaultAddressId === addressId || !addresses.some((x) => x.id === defaultAddressId)) {
+          defaultAddressId = addresses[0] ? addresses[0].id : ''
+        }
+        await tx.collection('customers').doc(openId).update({
+          data: {
+            nickname,
+            addresses,
+            defaultAddressId,
+            updatedAt: db.serverDate(),
+          },
+        })
+        return toProfileOutput({ nickname, addresses, defaultAddressId })
+      })
+    } catch (err) {
+      if (err && err.code) return fail(err.code, err.message || '删除地址失败', err.detail)
+      return fail('TX_FAILED', '删除地址失败', String(err && err.message))
+    }
+    const cfg = await getOrCreateAdminConfig()
+    return ok({ profile: attachMinOrderInfo(profile, buildDeliveryMinRule(cfg)) })
+  }
+
+  if (action === 'setDefaultAddress') {
+    const addressId = String(event.addressId || '').trim()
+    if (!addressId) return fail('BAD_REQUEST', '缺少 addressId')
+    let profile = null
+    try {
+      profile = await db.runTransaction(async (tx) => {
+        let customer = null
+        try {
+          const got = await tx.collection('customers').doc(openId).get()
+          customer = got.data
+        } catch (err) {
+          customer = null
+        }
+        if (!customer) throwBiz('BAD_REQUEST', '请先完善资料')
+        const nickname = sanitizeProfileNickname(customer.nickname)
+        const addresses = normalizeStoredAddresses(customer.addresses)
+        if (!addresses.some((x) => x.id === addressId)) throwBiz('ADDRESS_NOT_FOUND', '地址不存在')
+        await tx.collection('customers').doc(openId).update({
+          data: {
+            nickname,
+            addresses,
+            defaultAddressId: addressId,
+            updatedAt: db.serverDate(),
+          },
+        })
+        return toProfileOutput({ nickname, addresses, defaultAddressId: addressId })
+      })
+    } catch (err) {
+      if (err && err.code) return fail(err.code, err.message || '设置默认地址失败', err.detail)
+      return fail('TX_FAILED', '设置默认地址失败', String(err && err.message))
+    }
+    const cfg = await getOrCreateAdminConfig()
+    return ok({ profile: attachMinOrderInfo(profile, buildDeliveryMinRule(cfg)) })
+  }
+
   if (action === 'listActiveDishesForBrowse') {
     const r = await db
       .collection('dishes')
@@ -230,6 +649,7 @@ exports.main = async (event) => {
 
   if (action === 'bootstrapHome') {
     const sale = await getActiveSale()
+    const profileDoc = await ensureCustomerDoc(openId)
     const r = await db
       .collection('dishes')
       .where({ isActive: true })
@@ -281,7 +701,7 @@ exports.main = async (event) => {
         isSoldOut: !!cfg && soldQty >= limitQty,
       }
     })
-    return ok({ sale: saleInfo, dishes: out })
+    return ok({ sale: saleInfo, dishes: out, profile: toProfileSummary(profileDoc) })
   }
 
   if (action === 'getCurrentSale') {
@@ -384,16 +804,22 @@ exports.main = async (event) => {
   if (action === 'getMySaleOrder') {
     const saleId = String(event.saleId || '').trim()
     if (!saleId) return fail('BAD_REQUEST', 'Missing saleId')
-    const r = await db
-      .collection('orders')
-      .where({
-        saleId,
-        customerOpenId: openId,
-        status: 'ACTIVE',
-      })
-      .limit(1)
-      .get()
-    return ok({ order: (r.data && r.data[0]) || null })
+    let order = null
+    try {
+      const r = await db
+        .collection('orders')
+        .where({
+          saleId,
+          customerOpenId: openId,
+          status: _.in([ORDER_STATUS.ACTIVE, ORDER_STATUS.PENDING_REVIEW]),
+        })
+        .limit(20)
+        .get()
+      order = pickLatestOrder(r.data || [])
+    } catch (err) {
+      order = null
+    }
+    return ok({ order })
   }
 
   if (action === 'getMyOrderDetail') {
@@ -424,7 +850,9 @@ exports.main = async (event) => {
           throwBiz('ORDER_NOT_FOUND', 'Order not found')
         }
         if (!order || order.customerOpenId !== openId) throwBiz('FORBIDDEN', 'Forbidden')
-        if (order.status !== 'ACTIVE') throwBiz('ORDER_NOT_EDITABLE', 'Order is not editable')
+        if (order.status !== ORDER_STATUS.ACTIVE && order.status !== ORDER_STATUS.PENDING_REVIEW) {
+          throwBiz('ORDER_NOT_EDITABLE', 'Order is not editable')
+        }
         if (!order.saleId) throwBiz('BAD_REQUEST', 'Order sale missing')
 
         let sale
@@ -461,33 +889,35 @@ exports.main = async (event) => {
           if (!nextQtyMap.has(dishId)) nextQtyMap.set(dishId, 0)
         }
 
-        const outOfStock = []
-        for (const [dishId, nextQty] of nextQtyMap.entries()) {
-          const oldQty = toSafeInt(oldMap.get(dishId) && oldMap.get(dishId).qty, 0)
-          const delta = nextQty - oldQty
-          if (delta <= 0) continue
-          const cfgItem = cfgMap.get(dishId)
-          if (!cfgItem) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
-          const remain = Math.max(0, toSafeInt(cfgItem.limitQty, 0) - toSafeInt(cfgItem.soldQty, 0))
-          if (delta > remain) {
-            outOfStock.push({
-              dishId,
-              dishName: String((oldMap.get(dishId) && oldMap.get(dishId).dishName) || ''),
-              remainingQty: remain,
-              requiredQty: delta,
-            })
+        if (order.status === ORDER_STATUS.ACTIVE) {
+          const outOfStock = []
+          for (const [dishId, nextQty] of nextQtyMap.entries()) {
+            const oldQty = toSafeInt(oldMap.get(dishId) && oldMap.get(dishId).qty, 0)
+            const delta = nextQty - oldQty
+            if (delta <= 0) continue
+            const cfgItem = cfgMap.get(dishId)
+            if (!cfgItem) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
+            const remain = Math.max(0, toSafeInt(cfgItem.limitQty, 0) - toSafeInt(cfgItem.soldQty, 0))
+            if (delta > remain) {
+              outOfStock.push({
+                dishId,
+                dishName: String((oldMap.get(dishId) && oldMap.get(dishId).dishName) || ''),
+                remainingQty: remain,
+                requiredQty: delta,
+              })
+            }
           }
-        }
-        if (outOfStock.length > 0) throwBiz('OUT_OF_STOCK', 'Out of stock', { items: outOfStock })
+          if (outOfStock.length > 0) throwBiz('OUT_OF_STOCK', 'Out of stock', { items: outOfStock })
 
-        for (const [dishId, nextQty] of nextQtyMap.entries()) {
-          const oldQty = toSafeInt(oldMap.get(dishId) && oldMap.get(dishId).qty, 0)
-          const delta = nextQty - oldQty
-          if (delta === 0) continue
-          const cfgItem = cfgMap.get(dishId)
-          if (!cfgItem) continue
-          cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) + delta)
-          cfgMap.set(dishId, cfgItem)
+          for (const [dishId, nextQty] of nextQtyMap.entries()) {
+            const oldQty = toSafeInt(oldMap.get(dishId) && oldMap.get(dishId).qty, 0)
+            const delta = nextQty - oldQty
+            if (delta === 0) continue
+            const cfgItem = cfgMap.get(dishId)
+            if (!cfgItem) continue
+            cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) + delta)
+            cfgMap.set(dishId, cfgItem)
+          }
         }
 
         const nextItems = []
@@ -506,30 +936,33 @@ exports.main = async (event) => {
         }
         if (nextItems.length === 0) throwBiz('BAD_REQUEST', 'Order cannot be empty, cancel it instead')
 
-        const updatedConfigs = normalizedConfigs.map((x) => {
-          const cur = cfgMap.get(x.dishId)
-          return cur ? { dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty } : x
-        })
-        await tx.collection('sales').doc(order.saleId).update({
-          data: {
-            dishConfigs: updatedConfigs,
-            updatedAt: db.serverDate(),
-          },
-        })
+        if (order.status === ORDER_STATUS.ACTIVE) {
+          const updatedConfigs = normalizedConfigs.map((x) => {
+            const cur = cfgMap.get(x.dishId)
+            return cur ? { dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty } : x
+          })
+          await tx.collection('sales').doc(order.saleId).update({
+            data: {
+              dishConfigs: updatedConfigs,
+              updatedAt: db.serverDate(),
+            },
+          })
+        }
 
         const now = db.serverDate()
         await tx.collection('orders').doc(orderId).update({
           data: {
             items: nextItems,
             totals: { qty: totalQty, amountCents: totalAmountCents },
-            saleConfigVersionSnapshot: toSafeInt(sale.saleConfigVersion, 0),
+            saleConfigVersionSnapshot:
+              order.status === ORDER_STATUS.ACTIVE ? toSafeInt(sale.saleConfigVersion, 0) : toSafeInt(order.saleConfigVersionSnapshot, 0),
             updatedAt: now,
           },
         })
         await tx.collection('orderAuditLogs').add({
           data: {
             orderId,
-            action: 'CUSTOMER_UPDATE_ITEMS',
+            action: order.status === ORDER_STATUS.ACTIVE ? 'CUSTOMER_UPDATE_ITEMS' : 'CUSTOMER_UPDATE_PENDING_ITEMS',
             byOpenId: openId,
             at: now,
           },
@@ -555,8 +988,10 @@ exports.main = async (event) => {
           throwBiz('ORDER_NOT_FOUND', 'Order not found')
         }
         if (!order || order.customerOpenId !== openId) throwBiz('FORBIDDEN', 'Forbidden')
-        if (order.status === 'CANCELLED') return
-        if (order.status !== 'ACTIVE') throwBiz('ORDER_NOT_EDITABLE', 'Order is not editable')
+        if (order.status === ORDER_STATUS.CANCELLED || order.status === ORDER_STATUS.REJECTED) return
+        if (order.status !== ORDER_STATUS.ACTIVE && order.status !== ORDER_STATUS.PENDING_REVIEW) {
+          throwBiz('ORDER_NOT_EDITABLE', 'Order is not editable')
+        }
         if (!order.saleId) throwBiz('BAD_REQUEST', 'Order sale missing')
 
         let sale
@@ -568,31 +1003,33 @@ exports.main = async (event) => {
         }
         if (!sale || sale.status !== 'OPEN') throwBiz('ORDER_LOCKED', 'Sale closed, customer cancel disabled')
 
-        const normalizedConfigs = normalizeSaleDishConfigs(sale)
-        const configCheck = validateSaleDishConfigs(sale, normalizedConfigs)
-        if (!configCheck.ok) throwBiz('SALE_CONFIG_INVALID', configCheck.message)
-        const cfgMap = new Map(normalizedConfigs.map((x) => [x.dishId, { ...x }]))
-        for (const it of (order.items || [])) {
-          const dishId = String((it && it.dishId) || '').trim()
-          const qty = toSafeInt(it && it.qty, 0)
-          if (!dishId || qty <= 0) continue
-          const cfgItem = cfgMap.get(dishId)
-          if (!cfgItem) continue
-          cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) - qty)
-          cfgMap.set(dishId, cfgItem)
+        if (order.status === ORDER_STATUS.ACTIVE) {
+          const normalizedConfigs = normalizeSaleDishConfigs(sale)
+          const configCheck = validateSaleDishConfigs(sale, normalizedConfigs)
+          if (!configCheck.ok) throwBiz('SALE_CONFIG_INVALID', configCheck.message)
+          const cfgMap = new Map(normalizedConfigs.map((x) => [x.dishId, { ...x }]))
+          for (const it of (order.items || [])) {
+            const dishId = String((it && it.dishId) || '').trim()
+            const qty = toSafeInt(it && it.qty, 0)
+            if (!dishId || qty <= 0) continue
+            const cfgItem = cfgMap.get(dishId)
+            if (!cfgItem) continue
+            cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) - qty)
+            cfgMap.set(dishId, cfgItem)
+          }
+          const updatedConfigs = normalizedConfigs.map((x) => {
+            const cur = cfgMap.get(x.dishId)
+            return cur ? { dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty } : x
+          })
+          await tx.collection('sales').doc(order.saleId).update({
+            data: { dishConfigs: updatedConfigs, updatedAt: db.serverDate() },
+          })
         }
-        const updatedConfigs = normalizedConfigs.map((x) => {
-          const cur = cfgMap.get(x.dishId)
-          return cur ? { dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty } : x
-        })
-        await tx.collection('sales').doc(order.saleId).update({
-          data: { dishConfigs: updatedConfigs, updatedAt: db.serverDate() },
-        })
 
         const now = db.serverDate()
         await tx.collection('orders').doc(orderId).update({
           data: {
-            status: 'CANCELLED',
+            status: ORDER_STATUS.CANCELLED,
             cancelledAt: now,
             cancelledByOpenId: openId,
             updatedAt: now,
@@ -620,21 +1057,14 @@ exports.main = async (event) => {
     const saleId = event.saleId
     if (!saleId || saleId !== sale._id) return fail('NOT_OPEN', 'Not open for ordering')
 
-    const fulfillmentType = event.fulfillmentType
-    if (fulfillmentType !== 'delivery' && fulfillmentType !== 'pickup') {
+    const requestedFulfillmentType = event.fulfillmentType
+    if (requestedFulfillmentType !== 'delivery' && requestedFulfillmentType !== 'pickup') {
       return fail('BAD_REQUEST', 'Invalid fulfillmentType')
     }
 
-    const phone = normalizePhone(event.phone)
-    if (!isPhoneValid(phone)) return fail('INVALID_PHONE', 'Invalid phone')
-
-    const address = event.address
-    const acceptDeliverySlot = !!event.acceptDeliverySlot
-    if (fulfillmentType === 'delivery') {
-      if (!isAddressValid(address)) return fail('INVALID_ADDRESS', 'Invalid address')
-      if (!acceptDeliverySlot) return fail('DELIVERY_SLOT_NOT_ACCEPTED', 'Delivery slot not accepted')
-      if (!String(sale.deliveryTimeSlotLabel || '').trim()) return fail('NOT_OPEN', 'Delivery slot not set')
-    }
+    const requestedAddressId = String(event.addressId || '').trim()
+    const requestedAcceptDeliverySlot = !!event.acceptDeliverySlot
+    const requestedPhone = normalizePhone(event.phone)
 
     const items = Array.isArray(event.items) ? event.items : []
     if (items.length === 0) return fail('BAD_REQUEST', 'Empty items')
@@ -647,9 +1077,10 @@ exports.main = async (event) => {
       incomingQtyById.set(dishId, (incomingQtyById.get(dishId) || 0) + Math.floor(qty))
     }
     if (incomingQtyById.size === 0) return fail('BAD_REQUEST', 'Empty items')
-    const orderId = buildOrderId(sale._id, openId)
     const payment = event.payment || {}
     const paymentMethod = String(payment.method || 'cash')
+    const adminConfig = await getOrCreateAdminConfig()
+    const deliveryRule = buildDeliveryMinRule(adminConfig)
     try {
       const txRes = await db.runTransaction(async (tx) => {
         let saleDoc = null
@@ -668,24 +1099,64 @@ exports.main = async (event) => {
 
         let existing = null
         try {
-          const existingRes = await tx.collection('orders').doc(orderId).get()
-          existing = existingRes && existingRes.data
+          const existingRes = await tx
+            .collection('orders')
+            .where({
+              saleId: saleDoc._id,
+              customerOpenId: openId,
+              status: _.in([ORDER_STATUS.ACTIVE, ORDER_STATUS.PENDING_REVIEW]),
+            })
+            .limit(20)
+            .get()
+          existing = pickLatestOrder(existingRes && existingRes.data)
         } catch (err) {
           existing = null
         }
-        if (existing && existing.status === 'CANCELLED' && String(existing.cancelledByOpenId || '') !== openId) {
-          throwBiz('ORDER_CANCELLED', '订单已被店主取消，请联系店主')
+        const hasEditableExisting = !!existing
+        let fulfillmentType = requestedFulfillmentType
+        let addressId = requestedAddressId
+        let acceptDeliverySlot = requestedAcceptDeliverySlot
+        if (hasEditableExisting) {
+          const existingFulfillmentType = String(existing.fulfillmentType || '').trim()
+          if (existingFulfillmentType && requestedFulfillmentType !== existingFulfillmentType) {
+            throwBiz('FULFILLMENT_LOCKED', '已有订单不可修改交货方式')
+          }
+          if (existingFulfillmentType) fulfillmentType = existingFulfillmentType
+          if (fulfillmentType === 'delivery') {
+            const existingAddressId = String(existing.addressId || '').trim()
+            if (existingAddressId && requestedAddressId && requestedAddressId !== existingAddressId) {
+              throwBiz('ADDRESS_LOCKED', '已有订单不可修改地址')
+            }
+            if (existingAddressId) addressId = existingAddressId
+          } else {
+            addressId = ''
+          }
+        }
+        if (fulfillmentType === 'delivery') {
+          if (!addressId) throwBiz('BAD_REQUEST', '请选择地址')
+          if (!hasEditableExisting && !acceptDeliverySlot) {
+            throwBiz('DELIVERY_SLOT_NOT_ACCEPTED', 'Delivery slot not accepted')
+          }
+          if (!String(saleDoc.deliveryTimeSlotLabel || '').trim()) {
+            throwBiz('NOT_OPEN', 'Delivery slot not set')
+          }
+          acceptDeliverySlot = true
+        } else {
+          addressId = ''
+          acceptDeliverySlot = false
         }
 
         const existingQtyById = new Map()
+        const existingStockedQtyById = new Map()
         const existingItemById = new Map()
-        if (existing && existing.status === 'ACTIVE' && Array.isArray(existing.items)) {
+        if (hasEditableExisting && Array.isArray(existing.items)) {
           for (const oldItem of existing.items) {
             const dishId = String((oldItem && oldItem.dishId) || '').trim()
             const qty = toSafeInt(oldItem && oldItem.qty, 0)
             if (!dishId || qty <= 0) continue
             existingQtyById.set(dishId, qty)
             existingItemById.set(dishId, oldItem)
+            if (existing.status === ORDER_STATUS.ACTIVE) existingStockedQtyById.set(dishId, qty)
           }
         }
 
@@ -707,48 +1178,6 @@ exports.main = async (event) => {
           if (!d || !d.isActive) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
         }
 
-        const normalizedConfigs = normalizeSaleDishConfigs(saleDoc)
-        const configCheck = validateSaleDishConfigs(saleDoc, normalizedConfigs)
-        if (!configCheck.ok) throwBiz('SALE_CONFIG_INVALID', configCheck.message)
-        const cfgMap = new Map(normalizedConfigs.map((x) => [x.dishId, { ...x }]))
-        const outOfStock = []
-        for (const dishId of mergedDishIds) {
-          const newQty = toSafeInt(mergedQtyById.get(dishId), 0)
-          const oldQty = toSafeInt(existingQtyById.get(dishId), 0)
-          const delta = newQty - oldQty
-          if (delta <= 0) continue
-          const cfgItem = cfgMap.get(dishId)
-          if (!cfgItem) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
-          const remain = Math.max(0, toSafeInt(cfgItem.limitQty, 0) - toSafeInt(cfgItem.soldQty, 0))
-          if (delta > remain) {
-            outOfStock.push({
-              dishId,
-              dishName: (dishMap.get(dishId) && dishMap.get(dishId).name) || '',
-              remainingQty: remain,
-              requiredQty: delta,
-            })
-          }
-        }
-        if (outOfStock.length > 0) throwBiz('OUT_OF_STOCK', 'Out of stock', { items: outOfStock })
-
-        for (const dishId of mergedDishIds) {
-          const newQty = toSafeInt(mergedQtyById.get(dishId), 0)
-          const oldQty = toSafeInt(existingQtyById.get(dishId), 0)
-          const delta = newQty - oldQty
-          if (delta === 0) continue
-          const cfgItem = cfgMap.get(dishId)
-          if (!cfgItem) continue
-          cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) + delta)
-          cfgMap.set(dishId, cfgItem)
-        }
-        const updatedConfigs = normalizedConfigs.map((x) => {
-          const cur = cfgMap.get(x.dishId)
-          return cur ? { dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty } : x
-        })
-        await tx.collection('sales').doc(saleDoc._id).update({
-          data: { dishConfigs: updatedConfigs, updatedAt: db.serverDate() },
-        })
-
         const orderItems = []
         let totalQty = 0
         let totalAmountCents = 0
@@ -767,62 +1196,221 @@ exports.main = async (event) => {
         }
         if (orderItems.length === 0) throwBiz('BAD_REQUEST', 'Empty items')
 
-        const paidStatus = String((existing && existing.payment && existing.payment.paidStatus) || 'UNPAID')
+        let addressSnapshot = null
+        let orderAddressId = ''
+        let orderPhone = ''
+        let pendingReason = ''
+        let pendingDetail = null
+        let minOrderCentsForCity = null
+        let customer = null
+        try {
+          const customerGet = await tx.collection('customers').doc(openId).get()
+          customer = customerGet.data
+        } catch (err) {
+          customer = null
+        }
+        const addresses = normalizeStoredAddresses(customer && customer.addresses)
+        const picked = addressId ? addresses.find((x) => x.id === addressId) || null : null
+
+        if (fulfillmentType === 'delivery') {
+          if (!picked) throwBiz('ADDRESS_NOT_FOUND', '请选择有效地址')
+          addressSnapshot = {
+            label: String(picked.label || '').trim(),
+            line1: String(picked.line1 || '').trim(),
+            line2: String(picked.line2 || '').trim(),
+            postalCode: String(picked.postalCode || '').trim(),
+            city: String(picked.city || '').trim(),
+            phone: normalizePhone(picked.phone || ''),
+            country: 'FR',
+          }
+          if (!isAddressValid(addressSnapshot)) throwBiz('INVALID_ADDRESS', 'Invalid address')
+          orderAddressId = addressId
+          orderPhone = normalizePhone(addressSnapshot.phone)
+          if (!isPhoneValid(orderPhone)) throwBiz('INVALID_PHONE', 'Invalid phone')
+
+          const cityKey = normalizeCityKey(addressSnapshot.city)
+          if (deliveryRule.cityMinMap.has(cityKey)) {
+            minOrderCentsForCity = toSafeInt(deliveryRule.cityMinMap.get(cityKey), 0)
+          } else if (deliveryRule.defaultMinOrderCents) {
+            minOrderCentsForCity = deliveryRule.defaultMinOrderCents
+          }
+          if (!minOrderCentsForCity) {
+            pendingReason = 'CITY_RULE_MISSING'
+            pendingDetail = {
+              city: addressSnapshot.city,
+              postalCode: addressSnapshot.postalCode,
+            }
+          } else if (totalAmountCents < minOrderCentsForCity) {
+            throwBiz('MIN_ORDER_NOT_MET', '未达到该地址起送价', {
+              city: addressSnapshot.city,
+              totalAmountCents,
+              minOrderCents: minOrderCentsForCity,
+            })
+          }
+        } else {
+          orderAddressId = ''
+          addressSnapshot = null
+          if (requestedPhone) {
+            if (!isPhoneValid(requestedPhone)) throwBiz('INVALID_PHONE', 'Invalid phone')
+            orderPhone = requestedPhone
+          } else if (picked && isAddressValid({ ...picked, phone: picked.phone || '' })) {
+            orderPhone = normalizePhone(picked.phone || '')
+          } else if (existing && existing.contact && isPhoneValid(existing.contact.phone)) {
+            orderPhone = normalizePhone(existing.contact.phone)
+          } else {
+            orderPhone = ''
+          }
+          if (!isPhoneValid(orderPhone)) throwBiz('INVALID_PHONE', 'Invalid phone')
+        }
+
+        const nextStatus = pendingReason ? ORDER_STATUS.PENDING_REVIEW : ORDER_STATUS.ACTIVE
+        if (nextStatus === ORDER_STATUS.ACTIVE || (existing && existing.status === ORDER_STATUS.ACTIVE)) {
+          const normalizedConfigs = normalizeSaleDishConfigs(saleDoc)
+          const configCheck = validateSaleDishConfigs(saleDoc, normalizedConfigs)
+          if (!configCheck.ok) throwBiz('SALE_CONFIG_INVALID', configCheck.message)
+          const cfgMap = new Map(normalizedConfigs.map((x) => [x.dishId, { ...x }]))
+          const stockDishIdSet = new Set()
+          for (const dishId of mergedDishIds) stockDishIdSet.add(dishId)
+          for (const dishId of existingStockedQtyById.keys()) stockDishIdSet.add(dishId)
+          const stockDishIds = Array.from(stockDishIdSet)
+          const outOfStock = []
+          for (const dishId of stockDishIds) {
+            const newQty = nextStatus === ORDER_STATUS.ACTIVE ? toSafeInt(mergedQtyById.get(dishId), 0) : 0
+            const oldStockedQty = toSafeInt(existingStockedQtyById.get(dishId), 0)
+            const delta = newQty - oldStockedQty
+            if (delta <= 0) continue
+            const cfgItem = cfgMap.get(dishId)
+            if (!cfgItem) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
+            const remain = Math.max(0, toSafeInt(cfgItem.limitQty, 0) - toSafeInt(cfgItem.soldQty, 0))
+            if (delta > remain) {
+              outOfStock.push({
+                dishId,
+                dishName: (dishMap.get(dishId) && dishMap.get(dishId).name) || '',
+                remainingQty: remain,
+                requiredQty: delta,
+              })
+            }
+          }
+          if (outOfStock.length > 0) throwBiz('OUT_OF_STOCK', 'Out of stock', { items: outOfStock })
+
+          let stockChanged = false
+          for (const dishId of stockDishIds) {
+            const newQty = nextStatus === ORDER_STATUS.ACTIVE ? toSafeInt(mergedQtyById.get(dishId), 0) : 0
+            const oldStockedQty = toSafeInt(existingStockedQtyById.get(dishId), 0)
+            const delta = newQty - oldStockedQty
+            if (delta === 0) continue
+            const cfgItem = cfgMap.get(dishId)
+            if (!cfgItem) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
+            cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) + delta)
+            cfgMap.set(dishId, cfgItem)
+            stockChanged = true
+          }
+          if (stockChanged) {
+            const updatedConfigs = normalizedConfigs.map((x) => {
+              const cur = cfgMap.get(x.dishId)
+              return cur ? { dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty } : x
+            })
+            await tx.collection('sales').doc(saleDoc._id).update({
+              data: { dishConfigs: updatedConfigs, updatedAt: db.serverDate() },
+            })
+          }
+        }
+
+        const paidStatus = String((existing && existing.payment && existing.payment.paidStatus) || '') === 'PAID' ? 'PAID' : 'UNPAID'
         const now = db.serverDate()
         const doc = {
           saleId: saleDoc._id,
           customerOpenId: openId,
-          status: 'ACTIVE',
+          status: nextStatus,
           fulfillmentType,
           deliveryTimeSlotLabelSnapshot: fulfillmentType === 'delivery' ? String(saleDoc.deliveryTimeSlotLabel || '').trim() : null,
-          acceptDeliverySlot: fulfillmentType === 'delivery' ? true : false,
-          contact: { phone },
+          acceptDeliverySlot,
+          contact: { phone: orderPhone },
+          addressId: fulfillmentType === 'delivery' ? orderAddressId || null : null,
           address:
             fulfillmentType === 'delivery'
               ? {
-                  line1: String(address.line1 || '').trim(),
-                  line2: String(address.line2 || '').trim(),
-                  postalCode: String(address.postalCode || '').trim(),
-                  city: String(address.city || '').trim(),
+                  label: String((addressSnapshot && addressSnapshot.label) || '').trim(),
+                  line1: String((addressSnapshot && addressSnapshot.line1) || '').trim(),
+                  line2: String((addressSnapshot && addressSnapshot.line2) || '').trim(),
+                  postalCode: String((addressSnapshot && addressSnapshot.postalCode) || '').trim(),
+                  city: String((addressSnapshot && addressSnapshot.city) || '').trim(),
                   country: 'FR',
                 }
               : null,
+          minOrderCentsSnapshot: fulfillmentType === 'delivery' ? minOrderCentsForCity || null : null,
           payment: { method: paymentMethod, paidStatus },
           remark: String(event.remark || '').trim(),
           items: orderItems,
           totals: { qty: totalQty, amountCents: totalAmountCents },
-          saleConfigVersionSnapshot: toSafeInt(saleDoc.saleConfigVersion, 0),
+          saleConfigVersionSnapshot: nextStatus === ORDER_STATUS.ACTIVE ? toSafeInt(saleDoc.saleConfigVersion, 0) : 0,
           updatedAt: now,
         }
-        const auditAction = existing ? 'UPDATE' : 'CREATE'
+        const auditAction =
+          nextStatus === ORDER_STATUS.PENDING_REVIEW
+            ? existing
+              ? 'UPDATE_PENDING'
+              : 'CREATE_PENDING'
+            : existing
+              ? 'UPDATE'
+              : 'CREATE'
+        let currentOrderId = String((existing && existing._id) || '').trim()
         if (existing) {
-          await tx.collection('orders').doc(orderId).update({
-            data: {
-              ...doc,
-              cancelledAt: _.remove,
-              cancelledByOpenId: _.remove,
-              createdAt: existing.createdAt || now,
-            },
+          const updateData = {
+            ...doc,
+            cancelledAt: _.remove,
+            cancelledByOpenId: _.remove,
+            rejectedAt: _.remove,
+            rejectedByOpenId: _.remove,
+            rejectedReason: _.remove,
+            approvedAt: nextStatus === ORDER_STATUS.ACTIVE ? now : _.remove,
+          }
+          if (nextStatus === ORDER_STATUS.PENDING_REVIEW) {
+            updateData.pendingReason = pendingReason
+            updateData.pendingDetail = pendingDetail
+            updateData.pendingAt =
+              existing.status === ORDER_STATUS.PENDING_REVIEW && existing.pendingAt ? existing.pendingAt : now
+          } else {
+            updateData.pendingReason = _.remove
+            updateData.pendingDetail = _.remove
+            updateData.pendingAt = _.remove
+          }
+          await tx.collection('orders').doc(currentOrderId).update({
+            data: updateData,
           })
         } else {
-          await tx.collection('orders').doc(orderId).set({
-            data: {
-              ...doc,
-              createdAt: now,
-            },
+          const setDoc = {
+            ...doc,
+            createdAt: now,
+          }
+          if (nextStatus === ORDER_STATUS.PENDING_REVIEW) {
+            setDoc.pendingReason = pendingReason
+            setDoc.pendingDetail = pendingDetail
+            setDoc.pendingAt = now
+          } else {
+            setDoc.approvedAt = now
+          }
+          const addRes = await tx.collection('orders').add({
+            data: setDoc,
           })
+          currentOrderId = String((addRes && addRes._id) || '').trim()
+          if (!currentOrderId) throwBiz('TX_FAILED', 'Create order failed')
         }
         await tx.collection('orderAuditLogs').add({
           data: {
-            orderId,
+            orderId: currentOrderId,
             action: auditAction,
             byOpenId: openId,
             at: now,
           },
         })
-        return { mode: auditAction }
+        return { orderId: currentOrderId, mode: auditAction, status: nextStatus }
       })
-      return ok({ orderId, mode: txRes && txRes.mode ? txRes.mode : 'UPDATE' })
+      return ok({
+        orderId: txRes && txRes.orderId ? txRes.orderId : '',
+        mode: txRes && txRes.mode ? txRes.mode : 'UPDATE',
+        status: txRes && txRes.status ? txRes.status : ORDER_STATUS.ACTIVE,
+      })
     } catch (err) {
       if (err && err.code) return fail(err.code, err.message || 'Request failed', err.detail)
       return fail('TX_FAILED', 'Create order failed', String(err && err.message))

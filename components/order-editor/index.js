@@ -32,6 +32,10 @@ Component({
       type: Boolean,
       value: false,
     },
+    showFulfillment: {
+      type: Boolean,
+      value: true,
+    },
     editHint: {
       type: String,
       value: '',

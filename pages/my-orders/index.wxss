@@ -48,6 +48,10 @@ page {
   background: rgba(255, 0, 0, 0.10);
   color: #b00020;
 }
+.tag.pending {
+  background: rgba(255, 186, 8, 0.2);
+  color: #7a4f00;
+}
 .muted {
   color: rgba(0, 0, 0, 0.55);
 }
@@ -58,4 +62,3 @@ page {
   font-weight: 700;
   font-size: 30rpx;
 }
-

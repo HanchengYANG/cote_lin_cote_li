@@ -68,6 +68,10 @@ Page({
     wx.navigateTo({ url: '/pages/admin/export/index' })
   },
 
+  goDeliveryRules() {
+    wx.navigateTo({ url: '/pages/admin/delivery-rules/index' })
+  },
+
   goExportWithSale(e) {
     const saleId = e.currentTarget.dataset.id
     wx.navigateTo({ url: `/pages/admin/export/index?saleId=${encodeURIComponent(saleId)}` })

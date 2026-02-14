@@ -55,6 +55,22 @@
         <view class="muted small">说明：每个已选菜都必须填写本次开单总量（非负整数）。</view>
       </view>
 
+      <view class="card">
+        <view class="title">延后确认订单（可选）</view>
+        <view class="muted small" wx:if="{{pendingOrders.length===0}}">当前没有待确认订单。</view>
+        <checkbox-group bindchange="onPendingSelect" wx:else>
+          <label class="pending-item" wx:for="{{pendingOrders}}" wx:key="_id">
+            <checkbox value="{{item._id}}" checked="{{item.checked}}" />
+            <view class="pending-main">
+              <view class="pending-title">{{item._id}}</view>
+              <view class="muted small">{{item.summary}}</view>
+              <view class="muted small" wx:if="{{item.address && item.address.city}}">Ville：{{item.address.city}}</view>
+            </view>
+          </label>
+        </checkbox-group>
+        <view class="muted small">勾选后将在本次“开单”时自动确认，并占用本次库存。</view>
+      </view>
+
       <button class="btn" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存草稿</button>
       <button class="btn ghost" loading="{{opening}}" disabled="{{opening || openDisabled}}" bindtap="openSale">开单</button>
     </view>

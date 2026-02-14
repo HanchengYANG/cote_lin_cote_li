@@ -12,8 +12,8 @@
     <view class="muted small">时间：{{order.createdAtText}}</view>
   </view>
 
-  <view class="card">
-    <view class="title">履约</view>
+  <view class="card" wx:if="{{showFulfillment}}">
+    <view class="title">交货方式</view>
     <view class="muted small">{{order.fulfillmentText}}</view>
     <view class="muted small" wx:if="{{order.deliveryTimeSlotLabelSnapshot}}">时间段：{{order.deliveryTimeSlotLabelSnapshot}}</view>
   </view>

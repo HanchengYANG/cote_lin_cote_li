@@ -41,7 +41,12 @@ Page({
     const editableItems = buildEditableItems(rawOrder)
     const editableTotals = calcEditableTotals(editableItems)
     const activeSale = saleRes && saleRes.ok && saleRes.data && saleRes.data.sale
-    const canEdit = !!(rawOrder && rawOrder.status === 'ACTIVE' && activeSale && activeSale._id === rawOrder.saleId)
+    const canEdit = !!(
+      rawOrder &&
+      (rawOrder.status === 'ACTIVE' || rawOrder.status === 'PENDING_REVIEW') &&
+      activeSale &&
+      activeSale._id === rawOrder.saleId
+    )
     this.setData({
       order,
       canEdit,

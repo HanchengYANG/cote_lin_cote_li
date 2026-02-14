@@ -2,21 +2,12 @@ const { call } = require('../../../utils/api')
 const { formatTime } = require('../../../utils/format')
 const { decorateOrderSummary } = require('../../../utils/order-list')
 
-const TYPE_OPTIONS = [
-  { label: '全部', value: 'all' },
-  { label: '配送', value: 'delivery' },
-  { label: '自取', value: 'pickup' },
-]
-
 Page({
   data: {
     loading: false,
     saleOptions: [{ label: '加载中...', value: '' }],
     saleIndex: 0,
     saleLabel: '加载中...',
-    typeOptions: TYPE_OPTIONS,
-    typeIndex: 0,
-    typeLabel: TYPE_OPTIONS[0].label,
     orders: [],
   },
 
@@ -50,19 +41,13 @@ Page({
   onPickSale(e) {
     this.setData({ saleIndex: Number(e.detail.value || 0) })
     this.recomputeLabels()
-  },
-
-  onPickType(e) {
-    this.setData({ typeIndex: Number(e.detail.value || 0) })
-    this.recomputeLabels()
+    this.reload()
   },
 
   recomputeLabels() {
     const saleLabel =
       (this.data.saleOptions[this.data.saleIndex] && this.data.saleOptions[this.data.saleIndex].label) || '未选择'
-    const typeLabel =
-      (this.data.typeOptions[this.data.typeIndex] && this.data.typeOptions[this.data.typeIndex].label) || '未选择'
-    this.setData({ saleLabel, typeLabel })
+    this.setData({ saleLabel })
   },
 
   async reload() {
@@ -71,9 +56,8 @@ Page({
       this.setData({ orders: [] })
       return
     }
-    const type = this.data.typeOptions[this.data.typeIndex].value
     this.setData({ loading: true })
-    const res = await call('admin', 'listOrders', { saleId, fulfillmentType: type })
+    const res = await call('admin', 'listOrders', { saleId })
     this.setData({ loading: false })
     if (!res.ok) {
       wx.showToast({ title: res.message || '加载失败', icon: 'none' })
