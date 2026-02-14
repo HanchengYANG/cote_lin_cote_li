@@ -1,33 +1,18 @@
 const { call } = require('../../utils/api')
+const { normalizePhone } = require('../../utils/phone')
+const { normalizeFrAddress, isFrAddressValid } = require('../../utils/fr-address')
 
 function normalizeAddress(a) {
-  return {
-    label: String((a && a.label) || '').trim(),
-    line1: String((a && a.line1) || '').trim(),
-    line2: String((a && a.line2) || '').trim(),
-    postalCode: String((a && a.postalCode) || '').trim(),
-    city: String((a && a.city) || '').trim(),
-    phone: String((a && a.phone) || '').trim(),
+  const normalized = normalizeFrAddress(a)
+  return normalized || {
+    label: '',
+    line1: '',
+    line2: '',
+    postalCode: '',
+    city: '',
+    phone: '',
     country: 'FR',
   }
-}
-
-function normalizePhone(phone) {
-  return String(phone || '')
-    .trim()
-    .replace(/[.\-\s]/g, '')
-}
-
-function isPhoneValid(phone) {
-  return /^(\+?\d{6,20})$/.test(normalizePhone(phone))
-}
-
-function isAddressValid(a) {
-  if (!a) return false
-  if (!a.label || !a.line1 || !a.city) return false
-  if (!/^\d{5}$/.test(String(a.postalCode || '').trim())) return false
-  if (!isPhoneValid(a.phone)) return false
-  return true
 }
 
 Page({
@@ -141,7 +126,7 @@ Page({
       wx.showToast({ title: '请填写昵称', icon: 'none' })
       return
     }
-    if (!isAddressValid(address)) {
+    if (!isFrAddressValid(address, { requirePhone: true, requireLabel: true })) {
       wx.showToast({ title: '请填写完整地址和电话', icon: 'none' })
       return
     }

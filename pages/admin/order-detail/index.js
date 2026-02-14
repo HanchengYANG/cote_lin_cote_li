@@ -1,4 +1,7 @@
 const { call } = require('../../../utils/api')
+const { normalizePhone, isPhoneValid } = require('../../../utils/phone')
+const { normalizeFrAddress, isFrAddressValid } = require('../../../utils/fr-address')
+const { parseSlotLabel, buildSlotLabel } = require('../../../utils/delivery-slot')
 const {
   decorateOrder,
   buildEditableItems,
@@ -8,55 +11,20 @@ const {
   buildPayloadItems,
 } = require('../../../utils/order-editor')
 
-function parseSlotLabel(label) {
-  const s = String(label || '').trim()
-  const m = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})-(\d{2}:\d{2})$/)
-  if (!m) return null
-  return {
-    slotDate: m[1],
-    slotStart: m[2],
-    slotEnd: m[3],
-  }
-}
-
-function buildSlotLabel(slotDate, slotStart, slotEnd) {
-  const d = String(slotDate || '').trim()
-  const s = String(slotStart || '').trim()
-  const e = String(slotEnd || '').trim()
-  if (!d || !s || !e) return ''
-  return `${d} ${s}-${e}`
-}
-
-function normalizePhone(phone) {
-  return String(phone || '')
-    .trim()
-    .replace(/[.\-\s]/g, '')
-}
-
-function isPhoneValid(phone) {
-  return /^(\+?\d{6,20})$/.test(String(phone || '').trim())
-}
-
 function normalizeManualAddress(input) {
-  const src = input || {}
+  const normalized = normalizeFrAddress(input) || {}
   return {
-    label: String(src.label || '').trim(),
-    line1: String(src.line1 || '').trim(),
-    line2: String(src.line2 || '').trim(),
-    postalCode: String(src.postalCode || '').trim(),
-    city: String(src.city || '').trim(),
-    country: String(src.country || 'FR')
-      .trim()
-      .toUpperCase() || 'FR',
+    label: String(normalized.label || '').trim(),
+    line1: String(normalized.line1 || '').trim(),
+    line2: String(normalized.line2 || '').trim(),
+    postalCode: String(normalized.postalCode || '').trim(),
+    city: String(normalized.city || '').trim(),
+    country: String(normalized.country || 'FR').trim().toUpperCase() || 'FR',
   }
 }
 
 function isManualAddressValid(addr) {
-  const a = normalizeManualAddress(addr)
-  if (!a.line1 || !a.city) return false
-  if (!/^\d{5}$/.test(a.postalCode)) return false
-  if (a.country !== 'FR') return false
-  return true
+  return isFrAddressValid(normalizeManualAddress(addr), { requirePhone: false, requireLabel: false })
 }
 
 Page({

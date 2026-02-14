@@ -1,6 +1,7 @@
 const { call } = require('../../utils/api')
 const { centToEuro } = require('../../utils/format')
 const { outOfStockMessage } = require('../../utils/order-errors')
+const { normalizePhone, isPhoneValid } = require('../../utils/phone')
 
 const PAYMENT_METHODS = [
   { label: '现金', value: 'cash' },
@@ -28,17 +29,6 @@ function normalizeCartItems(input) {
     })
   }
   return out
-}
-
-function normalizePhone(phone) {
-  return String(phone || '')
-    .trim()
-    .replace(/[.\-\s]/g, '')
-}
-
-function isPhoneValid(phone) {
-  const s = String(phone || '').trim()
-  return /^(\+?\d{6,20})$/.test(s)
 }
 
 Page({
