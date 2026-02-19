@@ -17,7 +17,9 @@
               class="input city"
               placeholder="ville (ex: paris)"
               value="{{item.city}}"
+              focus="{{cityFocusRowId===item._rid}}"
               data-idx="{{index}}"
+              data-rid="{{item._rid}}"
               bindinput="onCityInput"
               bindfocus="onCityFocus"
               bindblur="onCityBlur"
@@ -38,6 +40,7 @@
             wx:for-item="cityName"
             data-rid="{{item._rid}}"
             data-city="{{cityName}}"
+            bindtouchstart="onCitySuggestionTouchStart"
             bindtap="pickCitySuggestion"
           >{{cityName}}</view>
         </view>

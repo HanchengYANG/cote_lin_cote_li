@@ -84,6 +84,7 @@
       cancelling="{{cancelling}}"
       show-payment-status="{{true}}"
       show-fulfillment="{{false}}"
+      show-contact="{{false}}"
       edit-hint="店主可直接修改本单菜品数量；如需整单作废请点“取消整单”。"
       lock-hint="订单已取消，不可编辑。"
       bindqtychange="onQtyChange"

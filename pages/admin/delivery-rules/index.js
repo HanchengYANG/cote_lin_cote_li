@@ -1,5 +1,6 @@
 const { call } = require('../../../utils/api')
 const { centToEuro, euroToCent } = require('../../../utils/format')
+const { suggestAddressDirect } = require('../../../utils/address-suggest')
 
 function buildRowId() {
   return `row_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -44,14 +45,18 @@ Page({
     loading: false,
     citySuggestRowId: '',
     citySuggestions: [],
+    cityFocusRowId: '',
   },
 
   onShow() {
+    this._citySuggestReqId = 0
+    this._isPickingCitySuggestion = false
     this.reload()
   },
 
   onUnload() {
     if (this._citySuggestTimer) clearTimeout(this._citySuggestTimer)
+    this._isPickingCitySuggestion = false
   },
 
   async reload() {
@@ -71,10 +76,12 @@ Page({
       defaultMinEuro: defaultMinEuro === '0.00' ? '' : defaultMinEuro,
       citySuggestRowId: '',
       citySuggestions: [],
+      cityFocusRowId: '',
     })
   },
 
   onCityInput(e) {
+    if (this._isPickingCitySuggestion) return
     const idx = Number(e.currentTarget.dataset.idx)
     const val = String((e.detail && e.detail.value) || '')
     const rows = normalizeRows(this.data.rows)
@@ -89,13 +96,19 @@ Page({
     const rows = normalizeRows(this.data.rows)
     const row = rows[idx]
     if (!row) return
+    this.setData({ cityFocusRowId: row._rid })
     this.debouncedSuggestCity(row._rid, row.city)
   },
 
-  onCityBlur() {
-    setTimeout(() => {
-      this.setData({ citySuggestRowId: '', citySuggestions: [] })
-    }, 120)
+  onCityBlur(e) {
+    if (this._isPickingCitySuggestion) return
+    const rid = String((e.currentTarget.dataset && e.currentTarget.dataset.rid) || '')
+    if (rid && rid !== String(this.data.cityFocusRowId || '')) return
+    this.setData({ citySuggestRowId: '', citySuggestions: [], cityFocusRowId: '' })
+  },
+
+  onCitySuggestionTouchStart() {
+    this._isPickingCitySuggestion = true
   },
 
   debouncedSuggestCity(rowId, q) {
@@ -105,20 +118,33 @@ Page({
       this.setData({ citySuggestRowId: '', citySuggestions: [] })
       return
     }
+    const reqId = (this._citySuggestReqId || 0) + 1
+    this._citySuggestReqId = reqId
     this._citySuggestTimer = setTimeout(() => {
-      this.fetchCitySuggestions(rowId, s)
+      this.fetchCitySuggestions(rowId, s, reqId)
     }, 220)
   },
 
-  async fetchCitySuggestions(rowId, q) {
+  async fetchCitySuggestions(rowId, q, reqId) {
+    if (reqId !== this._citySuggestReqId) return
+    if (this._isPickingCitySuggestion) return
     const rows = normalizeRows(this.data.rows)
-    if (!rows.some((r) => r._rid === rowId)) return
-    const res = await call('customer', 'suggestAddress', { q, limit: 8 })
-    if (!res.ok) {
+    const row = rows.find((r) => r._rid === rowId) || null
+    if (!row) return
+    if (String(this.data.cityFocusRowId || '') !== String(rowId)) return
+    if (String(row.city || '') !== String(q || '')) return
+    const res = await suggestAddressDirect(q, 8)
+    if (reqId !== this._citySuggestReqId) return
+    if (this._isPickingCitySuggestion) return
+    const latestRows = normalizeRows(this.data.rows)
+    const latestRow = latestRows.find((r) => r._rid === rowId) || null
+    if (!latestRow || String(latestRow.city || '') !== String(q || '')) return
+    if (String(this.data.cityFocusRowId || '') !== String(rowId)) return
+    if (!res.ok || !Array.isArray(res.suggestions)) {
       this.setData({ citySuggestRowId: '', citySuggestions: [] })
       return
     }
-    const citySuggestions = uniqueCityList(res.data && res.data.suggestions)
+    const citySuggestions = uniqueCityList(res.suggestions)
     this.setData({
       citySuggestRowId: citySuggestions.length > 0 ? rowId : '',
       citySuggestions,
@@ -126,17 +152,32 @@ Page({
   },
 
   pickCitySuggestion(e) {
+    if (this._citySuggestTimer) clearTimeout(this._citySuggestTimer)
+    this._citySuggestTimer = null
+    this._citySuggestReqId = (this._citySuggestReqId || 0) + 1
     const rowId = String(e.currentTarget.dataset.rid || '')
     const city = String(e.currentTarget.dataset.city || '')
-    if (!city) return
+    if (!city) {
+      this._isPickingCitySuggestion = false
+      return
+    }
     const rows = normalizeRows(this.data.rows)
     const idx = rows.findIndex((r) => r._rid === rowId)
-    if (idx < 0) return
+    if (idx < 0) {
+      this._isPickingCitySuggestion = false
+      return
+    }
     rows[idx].city = city
     this.setData({
       rows,
       citySuggestRowId: '',
       citySuggestions: [],
+      cityFocusRowId: '',
+    })
+    wx.hideKeyboard({
+      complete: () => {
+        this._isPickingCitySuggestion = false
+      },
     })
   },
 
@@ -160,6 +201,7 @@ Page({
       rows,
       citySuggestRowId: '',
       citySuggestions: [],
+      cityFocusRowId: '',
     })
   },
 
@@ -170,6 +212,7 @@ Page({
       rows,
       citySuggestRowId: '',
       citySuggestions: [],
+      cityFocusRowId: '',
     })
   },
 

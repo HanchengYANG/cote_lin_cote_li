@@ -36,6 +36,10 @@ Component({
       type: Boolean,
       value: true,
     },
+    showContact: {
+      type: Boolean,
+      value: true,
+    },
     editHint: {
       type: String,
       value: '',

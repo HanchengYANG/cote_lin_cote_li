@@ -1,6 +1,7 @@
 const { call } = require('../../utils/api')
 const { normalizePhone } = require('../../utils/phone')
 const { normalizeFrAddress, isFrAddressValid } = require('../../utils/fr-address')
+const { suggestAddressDirect } = require('../../utils/address-suggest')
 
 function normalizeAddress(a) {
   const normalized = normalizeFrAddress(a)
@@ -13,6 +14,15 @@ function normalizeAddress(a) {
     phone: '',
     country: 'FR',
   }
+}
+
+function line1FromSuggestion(suggestion) {
+  const raw = String((suggestion && (suggestion.line1 || suggestion.label)) || '').trim()
+  const parts = raw.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2 && String(parts[0]).toLowerCase() === String(parts[1]).toLowerCase()) {
+    parts.splice(1, 1)
+  }
+  return parts.join(' ')
 }
 
 Page({
@@ -31,9 +41,13 @@ Page({
       country: 'FR',
     },
     suggestions: [],
+    line1Focused: false,
   },
 
   async onLoad(query) {
+    this._suggestReqId = 0
+    this._timer = null
+    this._isPickingSuggestion = false
     this.setData({ from: String((query && query.from) || '') })
     await this.reload()
   },
@@ -80,7 +94,21 @@ Page({
     const value = e.detail.value
     const address = { ...this.data.address, line1: value }
     this.setData({ address })
+    if (this._isPickingSuggestion) return
     this.debouncedSuggest(value)
+  },
+
+  onLine1Focus() {
+    this.setData({ line1Focused: true })
+  },
+
+  onLine1Blur() {
+    if (this._isPickingSuggestion) return
+    this.setData({ line1Focused: false, suggestions: [] })
+  },
+
+  onSuggestionTouchStart() {
+    this._isPickingSuggestion = true
   },
 
   debouncedSuggest(q) {
@@ -90,31 +118,59 @@ Page({
       this.setData({ suggestions: [] })
       return
     }
+    const reqId = (this._suggestReqId || 0) + 1
+    this._suggestReqId = reqId
     this._timer = setTimeout(() => {
-      this.fetchSuggestions(s)
+      this.fetchSuggestions(s, reqId)
     }, 250)
   },
 
-  async fetchSuggestions(q) {
-    const res = await call('customer', 'suggestAddress', { q, limit: 5 })
-    if (!res.ok) {
+  async fetchSuggestions(q, reqId) {
+    const res = await suggestAddressDirect(q, 5)
+    if (reqId !== this._suggestReqId) return
+    if (this._isPickingSuggestion || !this.data.line1Focused) return
+    const latestLine1 = String((this.data.address && this.data.address.line1) || '').trim()
+    if (latestLine1 !== String(q || '').trim()) return
+    if (!res.ok || !Array.isArray(res.suggestions)) {
       this.setData({ suggestions: [] })
       return
     }
-    this.setData({ suggestions: res.data.suggestions || [] })
+    this.setData({ suggestions: res.suggestions })
   },
 
   pickSuggestion(e) {
+    if (this._timer) clearTimeout(this._timer)
+    this._timer = null
+    this._suggestReqId = (this._suggestReqId || 0) + 1
     const idx = Number(e.currentTarget.dataset.i)
     const s = (this.data.suggestions || [])[idx]
-    if (!s) return
+    if (!s) {
+      this._isPickingSuggestion = false
+      return
+    }
+    const nextLine1 = line1FromSuggestion(s)
     const address = {
       ...this.data.address,
-      line1: s.line1 || s.label || '',
+      line1: nextLine1,
       postalCode: s.postalCode || '',
       city: s.city || '',
     }
-    this.setData({ address, suggestions: [] })
+    this.setData({
+      address,
+      suggestions: [],
+      line1Focused: false,
+    })
+    wx.hideKeyboard({
+      complete: () => {
+        this._isPickingSuggestion = false
+      },
+    })
+  },
+
+  onUnload() {
+    if (this._timer) clearTimeout(this._timer)
+    this._timer = null
+    this._isPickingSuggestion = false
   },
 
   async save() {

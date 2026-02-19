@@ -44,6 +44,7 @@ Page({
     const canEdit = !!(
       rawOrder &&
       (rawOrder.status === 'ACTIVE' || rawOrder.status === 'PENDING_REVIEW') &&
+      !rawOrder.customerLocked &&
       activeSale &&
       activeSale._id === rawOrder.saleId
     )

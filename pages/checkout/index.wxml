@@ -12,7 +12,8 @@
 
     <view class="card">
       <view class="title">购物明细</view>
-      <view class="muted small" wx:if="{{saleStatus==='open' && hasExistingOrder}}">将把本次菜品追加到你当前订单</view>
+      <view class="warn-text small" wx:if="{{saleStatus==='open' && hasExistingOrder && existingOrderLocked}}">该订单已被店主确认并锁定，当前不可追加修改。</view>
+      <view class="muted small" wx:elif="{{saleStatus==='open' && hasExistingOrder}}">将把本次菜品追加到你当前订单</view>
       <view class="muted small" wx:if="{{lines.length===0}}">当前购物车无可下单菜品</view>
       <view class="line" wx:for="{{lines}}" wx:key="dishId">
         <view class="line-left">
@@ -30,7 +31,8 @@
 
     <view class="card">
       <view class="title">交货方式</view>
-      <view wx:if="{{hasExistingOrder}}" class="muted">已有订单，本次仅追加菜品，交货方式不可修改（{{fulfillmentType==='delivery' ? '配送' : '自取'}}）</view>
+      <view wx:if="{{hasExistingOrder && existingOrderLocked}}" class="warn-text">该订单已由店主确认锁定，顾客不可修改（{{fulfillmentType==='delivery' ? '配送' : '自取'}}）。</view>
+      <view wx:elif="{{hasExistingOrder}}" class="muted">已有订单，本次仅追加菜品，交货方式不可修改（{{fulfillmentType==='delivery' ? '配送' : '自取'}}）</view>
       <radio-group wx:else bindchange="onFulfillmentChange">
         <label class="radio">
           <radio value="delivery" checked="{{fulfillmentType==='delivery'}}" />

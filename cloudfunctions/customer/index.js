@@ -1,5 +1,4 @@
 const cloud = require('wx-server-sdk')
-const https = require('https')
 const {
   buildAddressId,
   toSafeInt,
@@ -105,6 +104,10 @@ function throwBiz(code, message, detail) {
   throw err
 }
 
+function isCustomerLocked(order) {
+  return !!(order && order.customerLocked)
+}
+
 async function getDishesByIds(ids, options = {}) {
   const onlyActive = options.onlyActive !== false
   const dishIds = Array.from(new Set((ids || []).filter(Boolean)))
@@ -152,26 +155,6 @@ async function ensureCustomerDoc(openId) {
     },
   })
   return getCustomerDoc(openId)
-}
-
-function httpGetJson(url) {
-  return new Promise((resolve, reject) => {
-    https
-      .get(url, (res) => {
-        let data = ''
-        res.on('data', (chunk) => {
-          data += chunk
-        })
-        res.on('end', () => {
-          try {
-            resolve(JSON.parse(data))
-          } catch (e) {
-            reject(e)
-          }
-        })
-      })
-      .on('error', reject)
-  })
 }
 
 async function getTempUrlMap(fileIDs) {
@@ -610,34 +593,6 @@ exports.main = async (event) => {
     })
   }
 
-  if (action === 'suggestAddress') {
-    const q = String(event.q || '').trim()
-    const limit = Math.min(10, Math.max(1, Number(event.limit || 5)))
-    if (q.length < 3) return ok({ suggestions: [] })
-    const url = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=${limit}`
-    try {
-      const json = await httpGetJson(url)
-      const features = (json && json.features) || []
-      const suggestions = features
-        .map((f) => (f && f.properties) || null)
-        .filter(Boolean)
-        .map((p) => {
-          const hn = p.housenumber ? String(p.housenumber) : ''
-          const name = p.name ? String(p.name) : (p.street ? String(p.street) : '')
-          const line1 = `${hn} ${name}`.trim() || (p.label ? String(p.label) : '')
-          return {
-            label: String(p.label || line1),
-            line1,
-            postalCode: String(p.postcode || ''),
-            city: String(p.city || ''),
-          }
-        })
-      return ok({ suggestions })
-    } catch (err) {
-      return fail('SUGGEST_FAILED', 'Suggest failed')
-    }
-  }
-
   if (action === 'listMyOrders') {
     const r = await db
       .collection('orders')
@@ -652,16 +607,28 @@ exports.main = async (event) => {
     if (!saleId) return fail('BAD_REQUEST', 'Missing saleId')
     let order = null
     try {
-      const r = await db
+      // Priority: pending order (cross-sale) > active order in current sale.
+      const pendingRes = await db
         .collection('orders')
         .where({
-          saleId,
           customerOpenId: openId,
-          status: _.in([ORDER_STATUS.ACTIVE, ORDER_STATUS.PENDING_REVIEW]),
+          status: ORDER_STATUS.PENDING_REVIEW,
         })
         .limit(20)
         .get()
-      order = pickLatestOrder(r.data || [])
+      order = pickLatestOrder(pendingRes.data || [])
+      if (!order) {
+        const activeRes = await db
+          .collection('orders')
+          .where({
+            saleId,
+            customerOpenId: openId,
+            status: ORDER_STATUS.ACTIVE,
+          })
+          .limit(20)
+          .get()
+        order = pickLatestOrder(activeRes.data || [])
+      }
     } catch (err) {
       order = null
     }
@@ -698,6 +665,9 @@ exports.main = async (event) => {
         if (!order || order.customerOpenId !== openId) throwBiz('FORBIDDEN', 'Forbidden')
         if (order.status !== ORDER_STATUS.ACTIVE && order.status !== ORDER_STATUS.PENDING_REVIEW) {
           throwBiz('ORDER_NOT_EDITABLE', 'Order is not editable')
+        }
+        if (isCustomerLocked(order)) {
+          throwBiz('ORDER_LOCKED_FOR_CUSTOMER', '该订单已由店主确认锁定，顾客不可修改')
         }
         if (!order.saleId) throwBiz('BAD_REQUEST', 'Order sale missing')
 
@@ -838,6 +808,9 @@ exports.main = async (event) => {
         if (order.status !== ORDER_STATUS.ACTIVE && order.status !== ORDER_STATUS.PENDING_REVIEW) {
           throwBiz('ORDER_NOT_EDITABLE', 'Order is not editable')
         }
+        if (isCustomerLocked(order)) {
+          throwBiz('ORDER_LOCKED_FOR_CUSTOMER', '该订单已由店主确认锁定，顾客不可取消')
+        }
         if (!order.saleId) throwBiz('BAD_REQUEST', 'Order sale missing')
 
         let sale
@@ -945,20 +918,34 @@ exports.main = async (event) => {
 
         let existing = null
         try {
-          const existingRes = await tx
+          const pendingRes = await tx
             .collection('orders')
             .where({
-              saleId: saleDoc._id,
               customerOpenId: openId,
-              status: _.in([ORDER_STATUS.ACTIVE, ORDER_STATUS.PENDING_REVIEW]),
+              status: ORDER_STATUS.PENDING_REVIEW,
             })
             .limit(20)
             .get()
-          existing = pickLatestOrder(existingRes && existingRes.data)
+          existing = pickLatestOrder((pendingRes && pendingRes.data) || [])
+          if (!existing) {
+            const activeRes = await tx
+              .collection('orders')
+              .where({
+                saleId: saleDoc._id,
+                customerOpenId: openId,
+                status: ORDER_STATUS.ACTIVE,
+              })
+              .limit(20)
+              .get()
+            existing = pickLatestOrder((activeRes && activeRes.data) || [])
+          }
         } catch (err) {
           existing = null
         }
         const hasEditableExisting = !!existing
+        if (hasEditableExisting && isCustomerLocked(existing)) {
+          throwBiz('ORDER_LOCKED_FOR_CUSTOMER', '该订单已由店主确认锁定，顾客不可修改')
+        }
         let fulfillmentType = requestedFulfillmentType
         let addressId = requestedAddressId
         let acceptDeliverySlot = requestedAcceptDeliverySlot
@@ -1011,6 +998,12 @@ exports.main = async (event) => {
           mergedQtyById.set(dishId, (mergedQtyById.get(dishId) || 0) + qty)
         }
         if (mergedQtyById.size === 0) throwBiz('BAD_REQUEST', 'Empty items')
+        const outOfCurrentSaleItemIds = []
+        if (hasEditableExisting && existing.status === ORDER_STATUS.PENDING_REVIEW) {
+          for (const dishId of existingQtyById.keys()) {
+            if (!allowed.has(dishId)) outOfCurrentSaleItemIds.push(dishId)
+          }
+        }
 
         const mergedDishIds = Array.from(mergedQtyById.keys())
         const dishMap = new Map()
@@ -1109,6 +1102,12 @@ exports.main = async (event) => {
           if (!isPhoneValid(orderPhone)) throwBiz('INVALID_PHONE', 'Invalid phone')
         }
 
+        if (!pendingReason && outOfCurrentSaleItemIds.length > 0) {
+          pendingReason = 'ITEM_NOT_IN_CURRENT_SALE'
+          pendingDetail = {
+            dishIds: outOfCurrentSaleItemIds,
+          }
+        }
         const nextStatus = pendingReason ? ORDER_STATUS.PENDING_REVIEW : ORDER_STATUS.ACTIVE
         if (nextStatus === ORDER_STATUS.ACTIVE || (existing && existing.status === ORDER_STATUS.ACTIVE)) {
           const normalizedConfigs = normalizeSaleDishConfigs(saleDoc)
@@ -1190,6 +1189,7 @@ exports.main = async (event) => {
           items: orderItems,
           totals: { qty: totalQty, amountCents: totalAmountCents },
           saleConfigVersionSnapshot: nextStatus === ORDER_STATUS.ACTIVE ? toSafeInt(saleDoc.saleConfigVersion, 0) : 0,
+          customerLocked: false,
           updatedAt: now,
         }
         const auditAction =
@@ -1210,6 +1210,8 @@ exports.main = async (event) => {
             rejectedByOpenId: _.remove,
             rejectedReason: _.remove,
             approvedAt: nextStatus === ORDER_STATUS.ACTIVE ? now : _.remove,
+            customerLockedAt: _.remove,
+            customerLockedReason: _.remove,
           }
           if (nextStatus === ORDER_STATUS.PENDING_REVIEW) {
             updateData.pendingReason = pendingReason

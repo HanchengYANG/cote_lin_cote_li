@@ -18,7 +18,7 @@
     <view class="muted small" wx:if="{{order.deliveryTimeSlotLabelSnapshot}}">时间段：{{order.deliveryTimeSlotLabelSnapshot}}</view>
   </view>
 
-  <view class="card">
+  <view class="card" wx:if="{{showContact}}">
     <view class="title">联系方式</view>
     <view class="muted small" wx:if="{{order.contact && order.contact.phone}}">电话：{{order.contact.phone}}</view>
     <view class="muted small" wx:if="{{order.fulfillmentType==='delivery'}}">地址：{{order.addressText}}</view>

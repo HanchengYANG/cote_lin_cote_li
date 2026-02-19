@@ -40,6 +40,7 @@ Page({
     totalAmountEuro: '0.00',
     totalAmountCents: 0,
     hasExistingOrder: false,
+    existingOrderLocked: false,
     existingOrderAmountCents: 0,
     existingOrderFulfillmentType: '',
     existingOrderAddressId: '',
@@ -175,6 +176,7 @@ Page({
         saleStatus: 'closed',
         sale: null,
         hasExistingOrder: false,
+        existingOrderLocked: false,
         existingOrderAmountCents: 0,
         existingOrderFulfillmentType: '',
         existingOrderAddressId: '',
@@ -221,6 +223,7 @@ Page({
       dishesById,
       cartItems,
       hasExistingOrder: !!existingOrder,
+      existingOrderLocked: !!(existingOrder && existingOrder.customerLocked),
       existingOrderAmountCents: Number((existingOrder && existingOrder.totals && existingOrder.totals.amountCents) || 0),
       existingOrderFulfillmentType: String((existingOrder && existingOrder.fulfillmentType) || ''),
       existingOrderAddressId: String((existingOrder && existingOrder.addressId) || ''),
@@ -361,6 +364,10 @@ Page({
       disabled = true
       reason = '当前未开单，暂不可提交订单'
     }
+    if (!disabled && this.data.existingOrderLocked) {
+      disabled = true
+      reason = '该订单已由店主确认锁定，无法再修改'
+    }
     const addr = this.getAddressById(this.data.selectedAddressId)
     const mergedTotalCents = Number(this.data.totalAmountCents || 0) + Number(this.data.existingOrderAmountCents || 0)
     if (!disabled && this.data.fulfillmentType === 'delivery') {
@@ -423,6 +430,11 @@ Page({
       }
       if (res.code === 'FULFILLMENT_LOCKED' || res.code === 'ADDRESS_LOCKED') {
         wx.showToast({ title: res.message || '已有订单不可修改交货方式或地址', icon: 'none' })
+        await this.reload()
+        return
+      }
+      if (res.code === 'ORDER_LOCKED_FOR_CUSTOMER') {
+        wx.showToast({ title: res.message || '该订单已锁定，无法修改', icon: 'none' })
         await this.reload()
         return
       }
