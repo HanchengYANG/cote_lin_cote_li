@@ -1,0 +1,66 @@
+.sync-guard {
+  position: fixed;
+  z-index: 9999;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(246, 247, 251, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx;
+  box-sizing: border-box;
+}
+
+.sync-panel {
+  width: 100%;
+  max-width: 560rpx;
+  background: #fff;
+  border-radius: 24rpx;
+  padding: 40rpx 32rpx;
+  box-sizing: border-box;
+  box-shadow: 0 12rpx 32rpx rgba(0, 0, 0, 0.1);
+}
+
+.sync-loading-dot {
+  width: 40rpx;
+  height: 40rpx;
+  margin: 0 auto 20rpx;
+  border-radius: 50%;
+  border: 4rpx solid rgba(0, 0, 0, 0.08);
+  border-top-color: #111;
+  animation: sync-spin 0.9s linear infinite;
+}
+
+.sync-title {
+  font-size: 34rpx;
+  font-weight: 700;
+  color: #111;
+  text-align: center;
+}
+
+.sync-sub {
+  margin-top: 14rpx;
+  font-size: 26rpx;
+  color: rgba(0, 0, 0, 0.55);
+  text-align: center;
+  word-break: break-all;
+}
+
+.sync-btn {
+  margin-top: 24rpx;
+  background: #111;
+  color: #fff;
+  border-radius: 14rpx;
+  height: 80rpx;
+  line-height: 80rpx;
+}
+
+@keyframes sync-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

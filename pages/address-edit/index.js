@@ -2,6 +2,7 @@ const { call } = require('../../utils/api')
 const { normalizePhone } = require('../../utils/phone')
 const { normalizeFrAddress, isFrAddressValid } = require('../../utils/fr-address')
 const { suggestAddressDirect } = require('../../utils/address-suggest')
+const { createPage } = require('../../utils/create-page')
 
 function normalizeAddress(a) {
   const normalized = normalizeFrAddress(a)
@@ -25,7 +26,7 @@ function line1FromSuggestion(suggestion) {
   return parts.join(' ')
 }
 
-Page({
+createPage({
   data: {
     addressId: '',
     saving: false,

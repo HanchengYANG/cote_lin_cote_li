@@ -1,7 +1,8 @@
 const { call } = require('../../../utils/api')
 const { centToEuro } = require('../../../utils/format')
+const { createPage } = require('../../../utils/create-page')
 
-Page({
+createPage({
   data: {
     dishes: [],
   },

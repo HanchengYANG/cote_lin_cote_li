@@ -1,5 +1,7 @@
 const { call } = require('../../../utils/api')
 const { centToEuro } = require('../../../utils/format')
+const { invalidateSnapshot } = require('../../../utils/app-snapshot')
+const { createPage } = require('../../../utils/create-page')
 
 function applySelected(dishes, dishIds, limitMap) {
   const set = new Set(dishIds || [])
@@ -10,7 +12,7 @@ function applySelected(dishes, dishIds, limitMap) {
   }))
 }
 
-Page({
+createPage({
   data: {
     sale: null,
     dishes: [],
@@ -276,6 +278,7 @@ Page({
       wx.showToast({ title: res.message || '开单失败', icon: 'none' })
       return
     }
+    invalidateSnapshot()
     wx.showToast({ title: '已开单', icon: 'success' })
     wx.navigateBack()
   },

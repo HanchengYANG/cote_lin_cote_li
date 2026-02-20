@@ -1,6 +1,7 @@
 const { call } = require('../../../utils/api')
 const { centToEuro, euroToCent } = require('../../../utils/format')
 const { getSession } = require('../../../utils/session')
+const { createPage } = require('../../../utils/create-page')
 
 function clampImages(arr) {
   const out = Array.isArray(arr) ? arr.filter(Boolean) : []
@@ -31,7 +32,7 @@ function chooseImages(remain) {
   return chooseImage()
 }
 
-Page({
+createPage({
   data: {
     dishId: '',
     name: '',

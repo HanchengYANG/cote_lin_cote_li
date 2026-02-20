@@ -23,6 +23,9 @@
     "navigationBarTextStyle": "black",
     "navigationStyle": "custom"
   },
+  "usingComponents": {
+    "sync-guard": "/components/sync-guard/index"
+  },
   "style": "v2",
   "renderer": "skyline",
   "rendererOptions": {

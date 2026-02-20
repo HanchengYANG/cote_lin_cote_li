@@ -1,47 +1,85 @@
 const { call } = require('../../../utils/api')
 const { formatTime } = require('../../../utils/format')
 const { getSession } = require('../../../utils/session')
+const { getSnapshot, invalidateSnapshot } = require('../../../utils/app-snapshot')
+const { createPage } = require('../../../utils/create-page')
 
-Page({
+createPage({
   data: {
+    refresherTriggered: false,
+    authKnown: false,
     isAdmin: false,
     myOpenId: '',
     activeSale: null,
     stats: { orderCount: 0 },
     sales: [],
+    saleKnown: false,
   },
 
-  onShow() {
-    this.reload()
+  onLoad() {
+    this.hydrateFromSnapshot()
+    this.reload({ silent: true })
   },
 
-  async reload() {
-    const sess = await getSession()
-    const isAdmin = !!sess.isAdmin
-    const myOpenId = sess.openId || ''
-    this.setData({ isAdmin, myOpenId })
-    if (!isAdmin) {
-      this.setData({ activeSale: null, stats: { orderCount: 0 }, sales: [] })
-      return
-    }
+  hydrateFromSnapshot() {
+    const snapshot = getSnapshot()
+    const sale = snapshot && snapshot.sale
+    if (!sale) return
+    const isOpen = !!sale.isOpen
+    this.setData({
+      activeSale: isOpen
+        ? {
+            _id: String(sale.saleId || sale._id || ''),
+            status: 'OPEN',
+            deliveryTimeSlotLabel: String(sale.deliveryTimeSlotLabel || ''),
+          }
+        : null,
+      saleKnown: true,
+    })
+  },
 
-    const [dashRes, salesRes] = await Promise.all([
-      call('admin', 'getDashboard'),
-      call('admin', 'listSales', { limit: 20 }),
-    ])
-    if (dashRes.ok) {
-      this.setData({
-        activeSale: dashRes.data.activeSale || null,
-        stats: dashRes.data.stats || { orderCount: 0 },
-      })
+  async reload(options = {}) {
+    const silent = !!options.silent
+    if (!silent) this.setData({ refresherTriggered: true })
+    try {
+      const sess = await getSession()
+      const isAdmin = !!sess.isAdmin
+      const myOpenId = sess.openId || ''
+      this.setData({ authKnown: true, isAdmin, myOpenId })
+      if (!isAdmin) {
+        this.setData({ activeSale: null, stats: { orderCount: 0 }, sales: [], saleKnown: true })
+        return
+      }
+
+      const [dashRes, salesRes] = await Promise.all([
+        call('admin', 'getDashboard'),
+        call('admin', 'listSales', { limit: 20 }),
+      ])
+      if (dashRes.ok) {
+        this.setData({
+          activeSale: dashRes.data.activeSale || null,
+          stats: dashRes.data.stats || { orderCount: 0 },
+          saleKnown: true,
+        })
+      } else if (!this.data.saleKnown) {
+        this.setData({ saleKnown: true })
+      }
+      if (salesRes.ok) {
+        const sales = (salesRes.data.sales || []).map((s) => ({
+          ...s,
+          createdAtText: formatTime(s.createdAt),
+        }))
+        this.setData({ sales })
+      }
+    } finally {
+      if (!silent) this.setData({ refresherTriggered: false })
     }
-    if (salesRes.ok) {
-      const sales = (salesRes.data.sales || []).map((s) => ({
-        ...s,
-        createdAtText: formatTime(s.createdAt),
-      }))
-      this.setData({ sales })
-    }
+  },
+
+  onPullDownRefresh() {
+    this.reload().finally(() => {
+      wx.stopPullDownRefresh()
+    })
   },
 
   copyOpenId() {
@@ -90,6 +128,7 @@ Page({
           wx.showToast({ title: res.message || '截单失败', icon: 'none' })
           return
         }
+        invalidateSnapshot()
         wx.showToast({ title: '已截单', icon: 'success' })
         this.reload()
       },

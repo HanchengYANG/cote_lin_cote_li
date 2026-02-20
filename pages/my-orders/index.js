@@ -1,7 +1,8 @@
 const { call } = require('../../utils/api')
 const { decorateOrderSummary } = require('../../utils/order-list')
+const { createPage } = require('../../utils/create-page')
 
-Page({
+createPage({
   data: {
     loading: false,
     orders: [],

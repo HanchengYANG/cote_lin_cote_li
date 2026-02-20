@@ -1,7 +1,14 @@
 <navigation-bar title="店主端" back="{{true}}" color="black" background="#FFF"></navigation-bar>
-<scroll-view class="scrollarea" scroll-y type="list">
+<sync-guard ready="{{isReady}}" error="{{syncError}}" bindretry="onSyncRetry"></sync-guard>
+<scroll-view class="scrollarea" scroll-y type="list" refresher-enabled="{{true}}" refresher-triggered="{{refresherTriggered}}" bindrefresherrefresh="onPullDownRefresh">
   <view class="page">
-    <block wx:if="{{!isAdmin}}">
+    <block wx:if="{{!authKnown}}">
+      <view class="card">
+        <view class="muted">状态同步中...</view>
+      </view>
+    </block>
+
+    <block wx:elif="{{!isAdmin}}">
       <view class="card">
         <view class="muted">无权限</view>
         <view class="muted small">请把你的 openid 加入云数据库 `adminConfig/main.adminOpenIds`</view>
@@ -13,7 +20,10 @@
     <block wx:else>
       <view class="card">
         <view class="title">当前开单</view>
-        <view wx:if="{{activeSale}}">
+        <view wx:if="{{!saleKnown}}">
+          <view class="muted">状态同步中...</view>
+        </view>
+        <view wx:elif="{{activeSale}}">
           <view class="muted small">状态：{{activeSale.status}}</view>
           <view class="muted small">配送时间段：{{activeSale.deliveryTimeSlotLabel}}</view>
           <view class="muted small">订单数：{{stats.orderCount}}</view>

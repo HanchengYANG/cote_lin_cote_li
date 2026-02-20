@@ -1,6 +1,7 @@
 const { call } = require('../../utils/api')
+const { createPage } = require('../../utils/create-page')
 
-Page({
+createPage({
   data: {
     orderId: '',
     tip: '',

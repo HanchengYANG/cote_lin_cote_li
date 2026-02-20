@@ -1,5 +1,6 @@
 const { call } = require('../../utils/api')
 const { centToEuro } = require('../../utils/format')
+const { createPage } = require('../../utils/create-page')
 
 function normalizeImageUrls(input) {
   if (!Array.isArray(input)) return []
@@ -9,7 +10,7 @@ function normalizeImageUrls(input) {
     .slice(0, 10)
 }
 
-Page({
+createPage({
   data: {
     dishId: '',
     loading: true,

@@ -2,6 +2,7 @@ const { call } = require('../../../utils/api')
 const { normalizePhone, isPhoneValid } = require('../../../utils/phone')
 const { normalizeFrAddress, isFrAddressValid } = require('../../../utils/fr-address')
 const { parseSlotLabel, buildSlotLabel } = require('../../../utils/delivery-slot')
+const { createPage } = require('../../../utils/create-page')
 const {
   decorateOrder,
   buildEditableItems,
@@ -27,7 +28,7 @@ function isManualAddressValid(addr) {
   return isFrAddressValid(normalizeManualAddress(addr), { requirePhone: false, requireLabel: false })
 }
 
-Page({
+createPage({
   data: {
     orderId: '',
     order: null,

@@ -1,6 +1,7 @@
 const { call } = require('../../utils/api')
+const { createPage } = require('../../utils/create-page')
 
-Page({
+createPage({
   data: {
     loading: false,
     selectMode: false,
@@ -14,7 +15,6 @@ Page({
       selectMode: String((query && query.select) || '') === '1',
       selectedAddressId: String((query && query.selectedAddressId) || ''),
     })
-    this.reload()
   },
 
   onShow() {

@@ -1,8 +1,9 @@
 const { call } = require('../../../utils/api')
 const { formatTime } = require('../../../utils/format')
 const { decorateOrderSummary } = require('../../../utils/order-list')
+const { createPage } = require('../../../utils/create-page')
 
-Page({
+createPage({
   data: {
     loading: false,
     saleOptions: [{ label: '加载中...', value: '' }],

@@ -1,4 +1,5 @@
 <navigation-bar title="起送价规则" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<sync-guard ready="{{isReady}}" error="{{syncError}}" bindretry="onSyncRetry"></sync-guard>
 <scroll-view class="scrollarea" scroll-y type="list">
   <view class="page">
     <view class="card">

@@ -1,5 +1,7 @@
 const { call } = require('../../../utils/api')
 const { centToEuro } = require('../../../utils/format')
+const { invalidateSnapshot } = require('../../../utils/app-snapshot')
+const { createPage } = require('../../../utils/create-page')
 
 function toSafeInt(v) {
   const n = Number(v)
@@ -9,7 +11,7 @@ function toSafeInt(v) {
   return Math.floor(n)
 }
 
-Page({
+createPage({
   data: {
     sale: null,
     dishes: [],
@@ -216,8 +218,8 @@ Page({
       wx.showToast({ title: res.message || '保存失败', icon: 'none' })
       return
     }
+    invalidateSnapshot()
     wx.showToast({ title: '已保存', icon: 'success' })
     await this.reload()
   },
 })
-

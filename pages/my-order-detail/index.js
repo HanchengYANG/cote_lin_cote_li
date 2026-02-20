@@ -1,4 +1,6 @@
 const { call } = require('../../utils/api')
+const { invalidateSnapshot } = require('../../utils/app-snapshot')
+const { createPage } = require('../../utils/create-page')
 const {
   decorateOrder,
   buildEditableItems,
@@ -9,7 +11,7 @@ const {
   outOfStockMessage,
 } = require('../../utils/order-editor')
 
-Page({
+createPage({
   data: {
     orderId: '',
     order: null,
@@ -95,6 +97,7 @@ Page({
     })
     this.setData({ saving: false })
     if (!res.ok) {
+      invalidateSnapshot()
       if (res.code === 'OUT_OF_STOCK') {
         wx.showToast({ title: outOfStockMessage(res.detail), icon: 'none' })
         await this.reload()
@@ -103,6 +106,7 @@ Page({
       wx.showToast({ title: res.message || '保存失败', icon: 'none' })
       return
     }
+    invalidateSnapshot()
     wx.showToast({ title: '已保存', icon: 'success' })
     await this.reload()
   },
@@ -123,9 +127,11 @@ Page({
     const res = await call('customer', 'cancelMyOrder', { orderId: this.data.orderId })
     this.setData({ cancelling: false })
     if (!res.ok) {
+      invalidateSnapshot()
       wx.showToast({ title: res.message || '取消失败', icon: 'none' })
       return
     }
+    invalidateSnapshot()
     wx.showToast({ title: '已取消', icon: 'success' })
     await this.reload()
   },

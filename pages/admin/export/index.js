@@ -1,6 +1,7 @@
 const { call } = require('../../../utils/api')
 const { formatTime } = require('../../../utils/format')
 const { wxp } = require('../../../utils/wxprom')
+const { createPage } = require('../../../utils/create-page')
 
 const TYPE_OPTIONS = [
   { label: '订单明细', value: 'ORDER_DETAIL' },
@@ -8,7 +9,7 @@ const TYPE_OPTIONS = [
   { label: '客户与地址清单', value: 'CUSTOMER_ADDRESS' },
 ]
 
-Page({
+createPage({
   data: {
     saleOptions: [{ label: '加载中...', value: '' }],
     saleIndex: 0,

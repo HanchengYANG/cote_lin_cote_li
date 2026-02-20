@@ -1,0 +1,12 @@
+<view class="sync-guard" wx:if="{{!ready}}" catchtouchmove="noop" catchtap="noop" style="top: {{navTopPx}}px;">
+  <view class="sync-panel" wx:if="{{!error}}">
+    <view class="sync-loading-dot"></view>
+    <view class="sync-title">正在同步数据</view>
+    <view class="sync-sub">请稍候，完成后自动显示页面</view>
+  </view>
+  <view class="sync-panel" wx:else>
+    <view class="sync-title">同步失败</view>
+    <view class="sync-sub">{{error}}</view>
+    <button class="sync-btn" bindtap="onRetryTap">重试</button>
+  </view>
+</view>

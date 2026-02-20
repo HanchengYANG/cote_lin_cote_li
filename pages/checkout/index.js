@@ -2,6 +2,8 @@ const { call } = require('../../utils/api')
 const { centToEuro } = require('../../utils/format')
 const { outOfStockMessage } = require('../../utils/order-errors')
 const { normalizePhone, isPhoneValid } = require('../../utils/phone')
+const { getSnapshot, invalidateSnapshot } = require('../../utils/app-snapshot')
+const { createPage } = require('../../utils/create-page')
 
 const PAYMENT_METHODS = [
   { label: '现金', value: 'cash' },
@@ -31,9 +33,10 @@ function normalizeCartItems(input) {
   return out
 }
 
-Page({
+createPage({
   data: {
-    saleStatus: 'loading',
+    refresherTriggered: false,
+    saleStatus: 'closed',
     sale: null,
     cartItems: [],
     lines: [],
@@ -79,11 +82,15 @@ Page({
       return
     }
     this.setData({ cartItems })
-    this._firstShowDone = false
-    await this.reload()
+    const hydrated = this.hydrateFromSnapshot()
+    if (!hydrated) {
+      this.setData({ saleStatus: 'closed', sale: null, dishesById: {} })
+    }
+    await this.reload({ silent: true, skipSaleFetch: true })
   },
 
-  async onShow() {
+  onShow() {
+    this.hydrateFromSnapshot()
     const pickedAddressId = String(wx.getStorageSync('checkout_selected_address_id') || '').trim()
     if (pickedAddressId) {
       wx.removeStorageSync('checkout_selected_address_id')
@@ -95,11 +102,33 @@ Page({
         this.recomputeSubmitDisabled()
       }
     }
-    if (!this._firstShowDone) {
-      this._firstShowDone = true
-      return
+  },
+
+  hydrateFromSnapshot() {
+    const snapshot = getSnapshot()
+    if (!snapshot || !snapshot.sale) return false
+    const snapSale = snapshot.sale
+    const dishes = Array.isArray(snapshot.dishes) ? snapshot.dishes : []
+    const dishesById = {}
+    for (const d of dishes) {
+      if (d && d._id) dishesById[d._id] = d
     }
-    await this.reload()
+    const isOpen = !!snapSale.isOpen
+    const sale = isOpen
+      ? {
+          _id: String(snapSale.saleId || snapSale._id || ''),
+          status: 'OPEN',
+          deliveryTimeSlotLabel: String(snapSale.deliveryTimeSlotLabel || ''),
+        }
+      : null
+    this.setData({
+      saleStatus: isOpen ? 'open' : 'closed',
+      sale,
+      dishesById,
+    })
+    this.recalcLines()
+    this.recomputeSubmitDisabled()
+    return true
   },
 
   saveCart() {
@@ -149,18 +178,27 @@ Page({
     }
     this.setData({
       minOrderText: '',
-      minOrderHint: '该 ville 暂无起送价规则，提交后会变为“待店主确认”，且不会立即扣库存。',
+      minOrderHint: '该城市暂无起送价规则，提交后会变为“待店主确认”，且不会立即扣库存。',
       pendingReviewHint: true,
     })
   },
 
-  async reload() {
-    this.setData({ saleStatus: 'loading' })
-    const [saleRes, profileRes] = await Promise.all([call('customer', 'getCurrentSale'), call('customer', 'getMyProfile')])
-    if (saleRes && !saleRes.ok) {
-      wx.showToast({ title: saleRes.message || '加载开单失败', icon: 'none' })
+  async reload(options = {}) {
+    const silent = !!options.silent
+    const skipSaleFetch = !!options.skipSaleFetch
+    if (!silent) {
+      this.setData({ refresherTriggered: true })
     }
+    let saleRes = null
+    if (!skipSaleFetch) {
+      saleRes = await call('customer', 'getCurrentSale')
+      if (saleRes && !saleRes.ok) {
+        wx.showToast({ title: saleRes.message || '加载开单失败', icon: 'none' })
+      }
+    }
+    const profileRes = await call('customer', 'getMyProfile')
     if (!profileRes || !profileRes.ok || !profileRes.data || !profileRes.data.profile) {
+      if (!silent) this.setData({ refresherTriggered: false })
       wx.showToast({ title: '资料加载失败', icon: 'none' })
       return
     }
@@ -168,19 +206,54 @@ Page({
     const profile = profileRes.data.profile
     const rawAddresses = Array.isArray(profile.addresses) ? profile.addresses : []
     const addresses = rawAddresses.map((a) => this.decorateAddress(a)).filter(Boolean)
-    if (!saleRes.ok || !saleRes.data || !saleRes.data.sale) {
+
+    let saleStatus = String(this.data.saleStatus || 'closed')
+    let sale = this.data.sale || null
+    let dishesById = this.data.dishesById || {}
+    let cartItems = normalizeCartItems(this.data.cartItems)
+    if (!skipSaleFetch) {
+      if (saleRes && saleRes.ok) {
+        if (!saleRes.data || !saleRes.data.sale) {
+          saleStatus = 'closed'
+          sale = null
+          dishesById = {}
+        } else {
+          saleStatus = 'open'
+          sale = saleRes.data.sale
+          const dishes = Array.isArray(saleRes.data.dishes) ? saleRes.data.dishes : []
+          const allowedSet = new Set((sale.dishIds || []).filter(Boolean))
+          dishesById = {}
+          for (const d of dishes) dishesById[d._id] = d
+          const prevItems = normalizeCartItems(this.data.cartItems)
+          cartItems = prevItems.filter((it) => allowedSet.has(it.dishId))
+          const removedCount = prevItems.length - cartItems.length
+          if (removedCount > 0) {
+            wx.showToast({ title: `已移除 ${removedCount} 个非本次开单菜品`, icon: 'none' })
+          }
+        }
+      } else {
+        // 拉取失败时沿用当前页状态，避免 UI 闪成“未开单”。
+        saleStatus = String(this.data.saleStatus || 'closed')
+        sale = this.data.sale || null
+        dishesById = this.data.dishesById || {}
+        cartItems = normalizeCartItems(this.data.cartItems)
+      }
+    }
+
+    if (saleStatus !== 'open' || !sale || !sale._id) {
       let selectedAddressId = String(this.data.selectedAddressId || '').trim()
       if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = String(profile.defaultAddressId || '')
       if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = String((addresses[0] && addresses[0].id) || '')
       this.setData({
-        saleStatus: 'closed',
-        sale: null,
+        saleStatus,
+        sale,
         hasExistingOrder: false,
         existingOrderLocked: false,
         existingOrderAmountCents: 0,
         existingOrderFulfillmentType: '',
         existingOrderAddressId: '',
-        dishesById: {},
+        dishesById,
+        cartItems,
         profile,
         addresses,
         selectedAddressId,
@@ -189,20 +262,8 @@ Page({
       this.recalcLines()
       this.recomputeAddressRuleHint()
       this.recomputeSubmitDisabled()
+      if (!silent) this.setData({ refresherTriggered: false })
       return
-    }
-
-    const sale = saleRes.data.sale
-    const dishes = Array.isArray(saleRes.data.dishes) ? saleRes.data.dishes : []
-    const allowedSet = new Set((sale.dishIds || []).filter(Boolean))
-    const dishesById = {}
-    for (const d of dishes) dishesById[d._id] = d
-
-    const prevItems = normalizeCartItems(this.data.cartItems)
-    const cartItems = prevItems.filter((it) => allowedSet.has(it.dishId))
-    const removedCount = prevItems.length - cartItems.length
-    if (removedCount > 0) {
-      wx.showToast({ title: `已移除 ${removedCount} 个非本次开单菜品`, icon: 'none' })
     }
 
     let existingOrder = null
@@ -256,6 +317,13 @@ Page({
     this.recalcLines()
     this.recomputeAddressRuleHint()
     this.recomputeSubmitDisabled()
+    if (!silent) this.setData({ refresherTriggered: false })
+  },
+
+  onPullDownRefresh() {
+    this.reload().finally(() => {
+      wx.stopPullDownRefresh()
+    })
   },
 
   recalcLines() {
@@ -356,10 +424,6 @@ Page({
       disabled = true
       reason = '当前购物车无可下单菜品'
     }
-    if (!disabled && this.data.saleStatus === 'loading') {
-      disabled = true
-      reason = '正在刷新开单状态...'
-    }
     if (!disabled && this.data.saleStatus !== 'open') {
       disabled = true
       reason = '当前未开单，暂不可提交订单'
@@ -417,6 +481,7 @@ Page({
     this.setData({ submitting: false })
     this.recomputeSubmitDisabled()
     if (!res.ok) {
+      invalidateSnapshot()
       if (res.code === 'OUT_OF_STOCK') {
         wx.showToast({ title: outOfStockMessage(res.detail, '库存不足，请返回菜单调整'), icon: 'none' })
         await this.reload()
@@ -445,6 +510,7 @@ Page({
       wx.showToast({ title: res.message || '下单失败', icon: 'none' })
       return
     }
+    invalidateSnapshot()
     wx.removeStorageSync('checkout_cart')
     const orderId = res.data && res.data.orderId
     wx.redirectTo({ url: `/pages/order-success/index?orderId=${encodeURIComponent(orderId)}` })

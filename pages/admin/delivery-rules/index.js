@@ -1,6 +1,7 @@
 const { call } = require('../../../utils/api')
 const { centToEuro, euroToCent } = require('../../../utils/format')
 const { suggestAddressDirect } = require('../../../utils/address-suggest')
+const { createPage } = require('../../../utils/create-page')
 
 function buildRowId() {
   return `row_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -37,7 +38,7 @@ function uniqueCityList(input) {
   return out
 }
 
-Page({
+createPage({
   data: {
     rows: [],
     defaultMinEuro: '',

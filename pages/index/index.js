@@ -1,8 +1,7 @@
-const { call } = require('../../utils/api')
 const { centToEuro } = require('../../utils/format')
 const { getSession } = require('../../utils/session')
-
-const HOME_CACHE_KEY = 'home_bootstrap_cache_v4'
+const { getSnapshot, ensureFresh, invalidateSnapshot } = require('../../utils/app-snapshot')
+const { createPage } = require('../../utils/create-page')
 
 function calcTotals(dishes, qtyMap) {
   let totalQty = 0
@@ -35,7 +34,7 @@ function sortDishesBySaleState(dishes, saleInfo) {
   return sorted
 }
 
-Page({
+createPage({
   data: {
     refresherTriggered: false,
     isAdmin: false,
@@ -65,8 +64,7 @@ Page({
 
   onShow() {
     if (!this._hasLoadedOnce) return
-    if (this.data.isHydrating) return
-    this.reload({ silent: true })
+    this.hydrateFromCache()
   },
 
   async bootstrap() {
@@ -77,11 +75,25 @@ Page({
     this.hydrateFromCache()
     const sess = await getSession()
     this.setData({ isAdmin: !!(sess && sess.isAdmin) })
-    await this.reload({ silent: this.data.dishes.length > 0 })
+    if (this.data.dishes.length === 0) {
+      await this.reload({ silent: true })
+      return
+    }
+    const profile = this.data.profileSummary || {}
+    const isComplete = !!profile.isComplete
+    if (!isComplete && !this._profileRedirecting) {
+      this._profileRedirecting = true
+      wx.navigateTo({
+        url: '/pages/profile-setup/index?from=index',
+        complete: () => {
+          this._profileRedirecting = false
+        },
+      })
+    }
   },
 
   hydrateFromCache() {
-    const cached = wx.getStorageSync(HOME_CACHE_KEY)
+    const cached = getSnapshot()
     if (!cached || !Array.isArray(cached.dishes) || !cached.sale) return
     this.applyBootstrap(cached.sale, cached.dishes, cached.profile || null)
   },
@@ -158,23 +170,23 @@ Page({
   async reload(options = {}) {
     const silent = !!options.silent
     if (!silent) this.setData({ refresherTriggered: true })
-    const res = await call('customer', 'bootstrapHome')
+    invalidateSnapshot()
+    let snapshot = null
+    try {
+      snapshot = await ensureFresh()
+    } catch (err) {
+      snapshot = null
+    }
     if (!silent) this.setData({ refresherTriggered: false })
-    if (!res.ok) {
+    if (!snapshot) {
       this.setData({ isHydrating: false })
-      this.reportError(res.message || '加载菜单失败', res)
+      this.reportError('加载菜单失败')
       return
     }
-    const sale = (res.data && res.data.sale) || { isOpen: false, saleId: '', deliveryTimeSlotLabel: '' }
-    const dishes = (res.data && res.data.dishes) || []
-    const profile = (res.data && res.data.profile) || null
+    const sale = snapshot.sale || { isOpen: false, saleId: '', deliveryTimeSlotLabel: '' }
+    const dishes = snapshot.dishes || []
+    const profile = snapshot.profile || null
     this.applyBootstrap(sale, dishes, profile)
-    wx.setStorageSync(HOME_CACHE_KEY, {
-      updatedAt: Date.now(),
-      sale,
-      dishes,
-      profile,
-    })
     const isComplete = !!(profile && profile.isComplete)
     if (!isComplete && !this._profileRedirecting) {
       this._profileRedirecting = true
