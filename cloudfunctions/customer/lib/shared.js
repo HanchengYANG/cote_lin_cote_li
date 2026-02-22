@@ -110,18 +110,26 @@ function sanitizeProfileNickname(input) {
   return String(input || '').trim().slice(0, 40)
 }
 
+function normalizeProfilePhone(input) {
+  const phone = normalizePhone(input)
+  if (!phone) return ''
+  return isPhoneValid(phone) ? phone : ''
+}
+
 function toProfileOutput(doc) {
   const nickname = sanitizeProfileNickname(doc && doc.nickname)
   const addresses = normalizeStoredAddresses(doc && doc.addresses)
+  const profilePhone = normalizeProfilePhone(doc && doc.profilePhone)
   let defaultAddressId = String((doc && doc.defaultAddressId) || '').trim()
   if (!addresses.some((a) => a.id === defaultAddressId)) {
     defaultAddressId = addresses[0] ? addresses[0].id : ''
   }
   return {
     nickname,
+    profilePhone,
     defaultAddressId,
     addresses,
-    isComplete: !!nickname && addresses.length > 0,
+    isComplete: !!nickname,
   }
 }
 
@@ -129,6 +137,7 @@ function toProfileSummary(doc) {
   const profile = toProfileOutput(doc)
   return {
     nickname: profile.nickname,
+    profilePhone: profile.profilePhone,
     defaultAddressId: profile.defaultAddressId,
     addressCount: profile.addresses.length,
     isComplete: profile.isComplete,
@@ -151,7 +160,7 @@ function buildDeliveryMinRule(config) {
 }
 
 function attachMinOrderInfo(profile, deliveryRule) {
-  const p = profile || { nickname: '', defaultAddressId: '', addresses: [], isComplete: false }
+  const p = profile || { nickname: '', profilePhone: '', defaultAddressId: '', addresses: [], isComplete: false }
   const rule = deliveryRule || { cityMinMap: new Map(), defaultMinOrderCents: null }
   const addresses = (p.addresses || []).map((a) => {
     const cityKey = normalizeCityKey(a.city)
@@ -180,6 +189,7 @@ module.exports = {
   normalizeAddressPayload,
   normalizeStoredAddresses,
   sanitizeProfileNickname,
+  normalizeProfilePhone,
   toProfileOutput,
   toProfileSummary,
   buildDeliveryMinRule,

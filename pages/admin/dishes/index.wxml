@@ -6,7 +6,13 @@
       <button class="btn" bindtap="add">新增菜品</button>
     </view>
 
-    <view class="list">
+    <view class="card" wx:if="{{initialLoading}}">
+      <view class="muted">载入中...</view>
+    </view>
+    <view class="card" wx:elif="{{initialLoaded && dishes.length===0}}">
+      <view class="muted">暂无菜品</view>
+    </view>
+    <view class="list" wx:else>
       <view class="item" wx:for="{{dishes}}" wx:key="_id">
         <view class="left" bindtap="edit" data-id="{{item._id}}">
           <view class="left-row">

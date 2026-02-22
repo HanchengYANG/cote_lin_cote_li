@@ -44,6 +44,8 @@ createPage({
     defaultMinEuro: '',
     saving: false,
     loading: false,
+    initialLoading: true,
+    initialLoaded: false,
     citySuggestRowId: '',
     citySuggestions: [],
     cityFocusRowId: '',
@@ -62,8 +64,14 @@ createPage({
 
   async reload() {
     this.setData({ loading: true })
+    const finishInitialLoad = () => {
+      if (this.data.initialLoading || !this.data.initialLoaded) {
+        this.setData({ initialLoading: false, initialLoaded: true })
+      }
+    }
     const res = await call('admin', 'getDeliveryRules')
     this.setData({ loading: false })
+    finishInitialLoad()
     if (!res.ok) {
       wx.showToast({ title: res.message || '加载失败', icon: 'none' })
       return

@@ -10,6 +10,7 @@ const {
   normalizeAddressPayload,
   normalizeStoredAddresses,
   sanitizeProfileNickname,
+  normalizeProfilePhone,
   toProfileOutput,
   toProfileSummary,
   buildDeliveryMinRule,
@@ -148,6 +149,7 @@ async function ensureCustomerDoc(openId) {
   await db.collection('customers').doc(openId).set({
     data: {
       nickname: '',
+      profilePhone: '',
       defaultAddressId: '',
       addresses: [],
       createdAt: now,
@@ -206,6 +208,57 @@ exports.main = async (event) => {
     return ok({ profile: attachMinOrderInfo(toProfileOutput(doc), buildDeliveryMinRule(cfg)) })
   }
 
+  if (action === 'updateMyNickname') {
+    const nickname = sanitizeProfileNickname(event.nickname)
+    const hasProfilePhone = Object.prototype.hasOwnProperty.call(event || {}, 'profilePhone')
+    const requestedProfilePhone = normalizePhone(event && event.profilePhone)
+    if (!nickname) return fail('BAD_REQUEST', '缺少昵称')
+    if (hasProfilePhone && requestedProfilePhone && !isPhoneValid(requestedProfilePhone)) {
+      return fail('INVALID_PHONE', '电话格式不正确')
+    }
+    let profile = null
+    try {
+      profile = await db.runTransaction(async (tx) => {
+        let customer = null
+        try {
+          const got = await tx.collection('customers').doc(openId).get()
+          customer = got.data
+        } catch (err) {
+          customer = null
+        }
+        const addresses = normalizeStoredAddresses(customer && customer.addresses)
+        let defaultAddressId = String((customer && customer.defaultAddressId) || '').trim()
+        if (!addresses.some((x) => x.id === defaultAddressId)) {
+          defaultAddressId = addresses[0] ? addresses[0].id : ''
+        }
+        let profilePhone = normalizeProfilePhone(customer && customer.profilePhone)
+        if (hasProfilePhone) profilePhone = requestedProfilePhone || ''
+        const saveData = {
+          nickname,
+          profilePhone,
+          addresses,
+          defaultAddressId,
+          updatedAt: db.serverDate(),
+        }
+        if (customer) {
+          await tx.collection('customers').doc(openId).update({ data: saveData })
+        } else {
+          await tx.collection('customers').doc(openId).set({
+            data: {
+              ...saveData,
+              createdAt: db.serverDate(),
+            },
+          })
+        }
+        return toProfileOutput({ nickname, profilePhone, addresses, defaultAddressId })
+      })
+    } catch (err) {
+      return fail('TX_FAILED', '保存昵称失败', String(err && err.message))
+    }
+    const cfg = await getOrCreateAdminConfig()
+    return ok({ profile: attachMinOrderInfo(profile, buildDeliveryMinRule(cfg)) })
+  }
+
   if (action === 'completeMyProfile') {
     const nickname = sanitizeProfileNickname(event.nickname)
     const address = normalizeAddressPayload(event.address, { requireLabel: true })
@@ -222,6 +275,7 @@ exports.main = async (event) => {
           customer = null
         }
         const oldAddresses = normalizeStoredAddresses(customer && customer.addresses)
+        const profilePhone = normalizeProfilePhone(customer && customer.profilePhone)
         const nowMs = Date.now()
         let addresses = oldAddresses
         let matched = oldAddresses.find((x) => {
@@ -249,6 +303,7 @@ exports.main = async (event) => {
         const defaultAddressId = matched.id
         const saveData = {
           nickname,
+          profilePhone,
           addresses,
           defaultAddressId,
           updatedAt: db.serverDate(),
@@ -263,7 +318,7 @@ exports.main = async (event) => {
             },
           })
         }
-        return toProfileOutput({ nickname, addresses, defaultAddressId })
+        return toProfileOutput({ nickname, profilePhone, addresses, defaultAddressId })
       })
     } catch (err) {
       return fail('TX_FAILED', '保存资料失败', String(err && err.message))
@@ -287,6 +342,7 @@ exports.main = async (event) => {
           customer = null
         }
         const nickname = sanitizeProfileNickname(customer && customer.nickname)
+        const profilePhone = normalizeProfilePhone(customer && customer.profilePhone)
         const oldAddresses = normalizeStoredAddresses(customer && customer.addresses)
         const nowMs = Date.now()
         const newAddr = {
@@ -301,6 +357,7 @@ exports.main = async (event) => {
         if (setDefault || !defaultAddressId) defaultAddressId = newAddr.id
         const saveData = {
           nickname,
+          profilePhone,
           addresses,
           defaultAddressId,
           updatedAt: db.serverDate(),
@@ -315,7 +372,7 @@ exports.main = async (event) => {
             },
           })
         }
-        return toProfileOutput({ nickname, addresses, defaultAddressId })
+        return toProfileOutput({ nickname, profilePhone, addresses, defaultAddressId })
       })
     } catch (err) {
       return fail('TX_FAILED', '保存地址失败', String(err && err.message))
@@ -342,6 +399,7 @@ exports.main = async (event) => {
         }
         if (!customer) throwBiz('BAD_REQUEST', '请先完善资料')
         const nickname = sanitizeProfileNickname(customer.nickname)
+        const profilePhone = normalizeProfilePhone(customer.profilePhone)
         const oldAddresses = normalizeStoredAddresses(customer.addresses)
         let found = false
         const nowMs = Date.now()
@@ -361,12 +419,13 @@ exports.main = async (event) => {
         await tx.collection('customers').doc(openId).update({
           data: {
             nickname,
+            profilePhone,
             addresses,
             defaultAddressId,
             updatedAt: db.serverDate(),
           },
         })
-        return toProfileOutput({ nickname, addresses, defaultAddressId })
+        return toProfileOutput({ nickname, profilePhone, addresses, defaultAddressId })
       })
     } catch (err) {
       if (err && err.code) return fail(err.code, err.message || '保存地址失败', err.detail)
@@ -391,6 +450,7 @@ exports.main = async (event) => {
         }
         if (!customer) throwBiz('BAD_REQUEST', '请先完善资料')
         const nickname = sanitizeProfileNickname(customer.nickname)
+        const profilePhone = normalizeProfilePhone(customer.profilePhone)
         const oldAddresses = normalizeStoredAddresses(customer.addresses)
         const addresses = oldAddresses.filter((x) => x.id !== addressId)
         if (addresses.length === oldAddresses.length) throwBiz('ADDRESS_NOT_FOUND', '地址不存在')
@@ -401,12 +461,13 @@ exports.main = async (event) => {
         await tx.collection('customers').doc(openId).update({
           data: {
             nickname,
+            profilePhone,
             addresses,
             defaultAddressId,
             updatedAt: db.serverDate(),
           },
         })
-        return toProfileOutput({ nickname, addresses, defaultAddressId })
+        return toProfileOutput({ nickname, profilePhone, addresses, defaultAddressId })
       })
     } catch (err) {
       if (err && err.code) return fail(err.code, err.message || '删除地址失败', err.detail)
@@ -431,17 +492,19 @@ exports.main = async (event) => {
         }
         if (!customer) throwBiz('BAD_REQUEST', '请先完善资料')
         const nickname = sanitizeProfileNickname(customer.nickname)
+        const profilePhone = normalizeProfilePhone(customer.profilePhone)
         const addresses = normalizeStoredAddresses(customer.addresses)
         if (!addresses.some((x) => x.id === addressId)) throwBiz('ADDRESS_NOT_FOUND', '地址不存在')
         await tx.collection('customers').doc(openId).update({
           data: {
             nickname,
+            profilePhone,
             addresses,
             defaultAddressId: addressId,
             updatedAt: db.serverDate(),
           },
         })
-        return toProfileOutput({ nickname, addresses, defaultAddressId: addressId })
+        return toProfileOutput({ nickname, profilePhone, addresses, defaultAddressId: addressId })
       })
     } catch (err) {
       if (err && err.code) return fail(err.code, err.message || '设置默认地址失败', err.detail)
@@ -1042,12 +1105,19 @@ exports.main = async (event) => {
         let pendingDetail = null
         let minOrderCentsForCity = null
         let customer = null
+        let customerNickname = ''
+        let customerProfilePhone = ''
         try {
           const customerGet = await tx.collection('customers').doc(openId).get()
           customer = customerGet.data
+          customerNickname = sanitizeProfileNickname(customer && customer.nickname)
+          customerProfilePhone = normalizeProfilePhone(customer && customer.profilePhone)
         } catch (err) {
           customer = null
+          customerNickname = ''
+          customerProfilePhone = ''
         }
+        if (!customerNickname) throwBiz('PROFILE_INCOMPLETE', '请先完善昵称')
         const addresses = normalizeStoredAddresses(customer && customer.addresses)
         const picked = addressId ? addresses.find((x) => x.id === addressId) || null : null
 
@@ -1092,8 +1162,8 @@ exports.main = async (event) => {
           if (requestedPhone) {
             if (!isPhoneValid(requestedPhone)) throwBiz('INVALID_PHONE', 'Invalid phone')
             orderPhone = requestedPhone
-          } else if (picked && isAddressValid({ ...picked, phone: picked.phone || '' })) {
-            orderPhone = normalizePhone(picked.phone || '')
+          } else if (customerProfilePhone && isPhoneValid(customerProfilePhone)) {
+            orderPhone = customerProfilePhone
           } else if (existing && existing.contact && isPhoneValid(existing.contact.phone)) {
             orderPhone = normalizePhone(existing.contact.phone)
           } else {
@@ -1244,6 +1314,22 @@ exports.main = async (event) => {
           currentOrderId = String((addRes && addRes._id) || '').trim()
           if (!currentOrderId) throwBiz('TX_FAILED', 'Create order failed')
         }
+
+        const shouldUpdateProfilePhone =
+          fulfillmentType === 'pickup' &&
+          requestedPhone &&
+          isPhoneValid(requestedPhone) &&
+          requestedPhone !== customerProfilePhone &&
+          !!customer
+        if (shouldUpdateProfilePhone) {
+          await tx.collection('customers').doc(openId).update({
+            data: {
+              profilePhone: requestedPhone,
+              updatedAt: now,
+            },
+          })
+        }
+
         await tx.collection('orderAuditLogs').add({
           data: {
             orderId: currentOrderId,

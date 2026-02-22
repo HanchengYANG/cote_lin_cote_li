@@ -5,6 +5,8 @@ const { normalizePhone, isPhoneValid } = require('../../utils/phone')
 const { getSnapshot, invalidateSnapshot } = require('../../utils/app-snapshot')
 const { createPage } = require('../../utils/create-page')
 
+const CHECKOUT_PROFILE_DIRTY_KEY = 'checkout_profile_dirty'
+
 const PAYMENT_METHODS = [
   { label: '现金', value: 'cash' },
   { label: '微信转账', value: 'wechat_transfer' },
@@ -33,8 +35,28 @@ function normalizeCartItems(input) {
   return out
 }
 
+function parseCheckoutProfileDirty(raw) {
+  if (!raw) return null
+  if (typeof raw === 'object') {
+    if (raw && typeof raw.reason === 'string') return raw
+    return { reason: 'unknown' }
+  }
+  const text = String(raw || '').trim()
+  if (!text) return null
+  if (text === '1') return { reason: 'unknown' }
+  try {
+    const parsed = JSON.parse(text)
+    if (parsed && typeof parsed === 'object' && typeof parsed.reason === 'string') return parsed
+  } catch (e) {
+    // ignore parse error, fallback to generic dirty refresh
+  }
+  return { reason: 'unknown' }
+}
+
 createPage({
   data: {
+    initialLoading: true,
+    initialLoaded: false,
     refresherTriggered: false,
     saleStatus: 'closed',
     sale: null,
@@ -102,6 +124,46 @@ createPage({
         this.recomputeSubmitDisabled()
       }
     }
+    const dirty = this.consumeCheckoutProfileDirty()
+    if (dirty) {
+      this.applyProfileDirtyOptimistic(dirty)
+      this.reload({ silent: true, skipSaleFetch: true })
+    }
+  },
+
+  consumeCheckoutProfileDirty() {
+    const raw = wx.getStorageSync(CHECKOUT_PROFILE_DIRTY_KEY)
+    if (!raw) return null
+    wx.removeStorageSync(CHECKOUT_PROFILE_DIRTY_KEY)
+    return parseCheckoutProfileDirty(raw)
+  },
+
+  applyProfileDirtyOptimistic(patch) {
+    if (!patch || patch.reason !== 'address_deleted') return
+    const deletedId = String(patch.addressId || '').trim()
+    if (!deletedId) return
+    const currentAddresses = Array.isArray(this.data.addresses) ? this.data.addresses : []
+    if (currentAddresses.length === 0) return
+    const nextAddresses = currentAddresses.filter((x) => String((x && x.id) || '').trim() !== deletedId)
+    if (nextAddresses.length === currentAddresses.length) return
+
+    const selectedAddressId = String(this.data.selectedAddressId || '').trim()
+    const selectedRemoved = selectedAddressId === deletedId
+    const nextData = { addresses: nextAddresses }
+    if (selectedRemoved) {
+      nextData.selectedAddressId = ''
+      nextData.selectedAddressIndex = 0
+      nextData.selectedAddressTitle = ''
+      nextData.selectedAddressDetail = ''
+      if (!this.data.hasExistingOrder && nextAddresses.length === 0) {
+        nextData.fulfillmentType = 'pickup'
+        nextData.acceptDeliverySlot = false
+      }
+    }
+    this.setData(nextData)
+    this.syncSelectedAddressView()
+    this.recomputeAddressRuleHint()
+    this.recomputeSubmitDisabled()
   },
 
   hydrateFromSnapshot() {
@@ -186,6 +248,11 @@ createPage({
   async reload(options = {}) {
     const silent = !!options.silent
     const skipSaleFetch = !!options.skipSaleFetch
+    const finishInitialLoad = () => {
+      if (this.data.initialLoading || !this.data.initialLoaded) {
+        this.setData({ initialLoading: false, initialLoaded: true })
+      }
+    }
     if (!silent) {
       this.setData({ refresherTriggered: true })
     }
@@ -198,12 +265,14 @@ createPage({
     }
     const profileRes = await call('customer', 'getMyProfile')
     if (!profileRes || !profileRes.ok || !profileRes.data || !profileRes.data.profile) {
+      finishInitialLoad()
       if (!silent) this.setData({ refresherTriggered: false })
       wx.showToast({ title: '资料加载失败', icon: 'none' })
       return
     }
 
     const profile = profileRes.data.profile
+    const profilePhone = normalizePhone(profile && profile.profilePhone)
     const rawAddresses = Array.isArray(profile.addresses) ? profile.addresses : []
     const addresses = rawAddresses.map((a) => this.decorateAddress(a)).filter(Boolean)
 
@@ -244,6 +313,7 @@ createPage({
       let selectedAddressId = String(this.data.selectedAddressId || '').trim()
       if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = String(profile.defaultAddressId || '')
       if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = String((addresses[0] && addresses[0].id) || '')
+      const pickupPhone = normalizePhone(this.data.pickupPhone || '') || profilePhone
       this.setData({
         saleStatus,
         sale,
@@ -257,11 +327,13 @@ createPage({
         profile,
         addresses,
         selectedAddressId,
+        pickupPhone,
       })
       this.syncSelectedAddressView()
       this.recalcLines()
       this.recomputeAddressRuleHint()
       this.recomputeSubmitDisabled()
+      finishInitialLoad()
       if (!silent) this.setData({ refresherTriggered: false })
       return
     }
@@ -293,7 +365,7 @@ createPage({
       selectedAddressId,
     }
     const selectedAddr = addresses.find((x) => x.id === selectedAddressId) || null
-    let pickupPhone = normalizePhone(this.data.pickupPhone || '')
+    let pickupPhone = normalizePhone(this.data.pickupPhone || '') || profilePhone
     if (!pickupPhone && selectedAddr && selectedAddr.phone) pickupPhone = normalizePhone(selectedAddr.phone)
     if (existingOrder) {
       const method = String((existingOrder.payment && existingOrder.payment.method) || 'cash')
@@ -317,6 +389,7 @@ createPage({
     this.recalcLines()
     this.recomputeAddressRuleHint()
     this.recomputeSubmitDisabled()
+    finishInitialLoad()
     if (!silent) this.setData({ refresherTriggered: false })
   },
 
@@ -505,6 +578,11 @@ createPage({
       }
       if (res.code === 'INVALID_PHONE') {
         wx.showToast({ title: '请填写有效电话', icon: 'none' })
+        return
+      }
+      if (res.code === 'PROFILE_INCOMPLETE') {
+        wx.showToast({ title: res.message || '请先完善资料', icon: 'none' })
+        wx.navigateTo({ url: '/pages/profile-setup/index?from=checkout' })
         return
       }
       wx.showToast({ title: res.message || '下单失败', icon: 'none' })

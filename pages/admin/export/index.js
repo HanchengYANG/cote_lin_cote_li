@@ -11,6 +11,8 @@ const TYPE_OPTIONS = [
 
 createPage({
   data: {
+    initialLoading: true,
+    initialLoaded: false,
     saleOptions: [{ label: '加载中...', value: '' }],
     saleIndex: 0,
     saleLabel: '加载中...',
@@ -31,8 +33,14 @@ createPage({
   },
 
   async reload() {
+    const finishInitialLoad = () => {
+      if (this.data.initialLoading || !this.data.initialLoaded) {
+        this.setData({ initialLoading: false, initialLoaded: true })
+      }
+    }
     const salesRes = await call('admin', 'listSales', { limit: 50 })
     if (!salesRes.ok) {
+      finishInitialLoad()
       wx.showToast({ title: salesRes.message || '加载失败', icon: 'none' })
       return
     }
@@ -49,6 +57,7 @@ createPage({
     }
     this.setData({ saleOptions: opts, saleIndex })
     this.recompute()
+    finishInitialLoad()
   },
 
   onPickSale(e) {

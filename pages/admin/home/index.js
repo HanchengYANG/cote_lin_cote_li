@@ -98,6 +98,10 @@ createPage({
     wx.navigateTo({ url: '/pages/admin/orders/index' })
   },
 
+  goCustomers() {
+    wx.navigateTo({ url: '/pages/admin/customers/index' })
+  },
+
   goActiveSaleEdit() {
     wx.navigateTo({ url: '/pages/admin/sale-active-edit/index' })
   },

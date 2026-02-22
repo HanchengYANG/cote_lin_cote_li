@@ -2,7 +2,10 @@
 <sync-guard ready="{{isReady}}" error="{{syncError}}" bindretry="onSyncRetry"></sync-guard>
 <scroll-view class="scrollarea" scroll-y type="list">
   <view class="page">
-    <view class="card" wx:if="{{!sale}}">
+    <view class="card" wx:if="{{initialLoading}}">
+      <view class="muted">载入中...</view>
+    </view>
+    <view class="card" wx:elif="{{!sale}}">
       <view class="muted">暂无开单中</view>
       <view class="muted small">请先开单再编辑</view>
     </view>

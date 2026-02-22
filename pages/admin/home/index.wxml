@@ -45,6 +45,7 @@
           <button class="btn ghost" bindtap="goDishes">菜品库</button>
           <button class="btn ghost" bindtap="goSaleDraft">开单草稿</button>
           <button class="btn ghost" bindtap="goOrders">订单管理</button>
+          <button class="btn ghost" bindtap="goCustomers">客人管理</button>
           <button class="btn ghost" bindtap="goExport">导出</button>
           <button class="btn ghost" bindtap="goDeliveryRules">起送价规则</button>
         </view>

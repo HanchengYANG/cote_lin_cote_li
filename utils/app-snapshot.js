@@ -44,11 +44,19 @@ function normalizePayload(raw) {
   const dishes = Array.isArray(raw && raw.dishes) ? raw.dishes : []
   const profile = raw && raw.profile && typeof raw.profile === 'object' ? raw.profile : null
   const admin = raw && raw.admin && typeof raw.admin === 'object' ? raw.admin : null
+  const session =
+    raw && raw.session && typeof raw.session === 'object'
+      ? {
+          openId: String(raw.session.openId || '').trim(),
+          isAdmin: !!raw.session.isAdmin,
+        }
+      : null
   return {
     sale,
     dishes,
     profile,
     admin,
+    session,
     updatedAt: Date.now(),
   }
 }
@@ -82,14 +90,16 @@ async function ensureFresh(options = {}) {
   const store = getStore()
   if (!force && store.valid && store.payload) return store.payload
 
-  const homeRes = await call('customer', 'bootstrapHome')
+  const [homeRes, sess] = await Promise.all([call('customer', 'bootstrapHome'), getSession()])
   if (!homeRes.ok || !homeRes.data) {
     throw new Error((homeRes && homeRes.message) || '同步失败，请重试')
+  }
+  if (!sess || !sess.ready) {
+    throw new Error('同步失败，请重试')
   }
 
   let admin = null
   if (includeAdmin) {
-    const sess = await getSession()
     if (sess && sess.isAdmin) {
       const dashRes = await call('admin', 'getDashboard')
       if (!dashRes.ok) {
@@ -106,6 +116,10 @@ async function ensureFresh(options = {}) {
     sale: homeRes.data.sale,
     dishes: homeRes.data.dishes,
     profile: homeRes.data.profile,
+    session: {
+      openId: String(sess.openId || '').trim(),
+      isAdmin: !!sess.isAdmin,
+    },
     admin,
   })
 }

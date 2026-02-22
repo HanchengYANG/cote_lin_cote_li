@@ -2,25 +2,29 @@
 <sync-guard ready="{{isReady}}" error="{{syncError}}" bindretry="onSyncRetry"></sync-guard>
 <scroll-view class="scrollarea" scroll-y type="list">
   <view class="page">
-    <view class="card" wx:if="{{addresses.length===0}}">
+    <view class="card" wx:if="{{initialLoading}}">
+      <view class="muted">载入中...</view>
+    </view>
+    <view class="card" wx:elif="{{initialLoaded && addresses.length===0}}">
       <view class="muted">还没有地址，先新增一个吧。</view>
     </view>
-
-    <view class="card" wx:for="{{addresses}}" wx:key="id">
-      <view class="row">
-        <view class="title">{{item.title}}</view>
-        <view class="tag" wx:if="{{item.isDefault}}">默认</view>
+    <block wx:else>
+      <view class="card" wx:for="{{addresses}}" wx:key="id">
+        <view class="row">
+          <view class="title">{{item.title}}</view>
+          <view class="tag" wx:if="{{item.isDefault}}">默认</view>
+        </view>
+        <view class="muted small">{{item.detail}}</view>
+        <view class="muted small" wx:if="{{item.phoneText}}">电话：{{item.phoneText}}</view>
+        <view class="ops">
+          <button class="btn ghost mini" data-id="{{item.id}}" bindtap="goEdit">编辑</button>
+          <button class="btn ghost mini" wx:if="{{!item.isDefault}}" data-id="{{item.id}}" bindtap="setDefault">设默认</button>
+          <button class="btn danger mini" data-id="{{item.id}}" bindtap="remove">删除</button>
+          <button class="btn mini" wx:if="{{selectMode}}" data-id="{{item.id}}" bindtap="choose">选这个</button>
+        </view>
       </view>
-      <view class="muted small">{{item.detail}}</view>
-      <view class="muted small" wx:if="{{item.phoneText}}">电话：{{item.phoneText}}</view>
-      <view class="ops">
-        <button class="btn ghost mini" data-id="{{item.id}}" bindtap="goEdit">编辑</button>
-        <button class="btn ghost mini" wx:if="{{!item.isDefault}}" data-id="{{item.id}}" bindtap="setDefault">设默认</button>
-        <button class="btn danger mini" data-id="{{item.id}}" bindtap="remove">删除</button>
-        <button class="btn mini" wx:if="{{selectMode}}" data-id="{{item.id}}" bindtap="choose">选这个</button>
-      </view>
-    </view>
+    </block>
 
-    <button class="btn" bindtap="goAdd">新增地址</button>
+    <button class="btn" wx:if="{{!initialLoading}}" bindtap="goAdd">新增地址</button>
   </view>
 </scroll-view>

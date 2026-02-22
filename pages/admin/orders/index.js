@@ -6,6 +6,8 @@ const { createPage } = require('../../../utils/create-page')
 createPage({
   data: {
     loading: false,
+    initialLoading: true,
+    initialLoaded: false,
     saleOptions: [{ label: '加载中...', value: '' }],
     saleIndex: 0,
     saleLabel: '加载中...',
@@ -52,14 +54,21 @@ createPage({
   },
 
   async reload() {
+    const finishInitialLoad = () => {
+      if (this.data.initialLoading || !this.data.initialLoaded) {
+        this.setData({ initialLoading: false, initialLoaded: true })
+      }
+    }
     const saleId = this.data.saleOptions[this.data.saleIndex] && this.data.saleOptions[this.data.saleIndex].value
     if (!saleId) {
       this.setData({ orders: [] })
+      finishInitialLoad()
       return
     }
     this.setData({ loading: true })
     const res = await call('admin', 'listOrders', { saleId })
     this.setData({ loading: false })
+    finishInitialLoad()
     if (!res.ok) {
       wx.showToast({ title: res.message || '加载失败', icon: 'none' })
       return

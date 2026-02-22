@@ -1,5 +1,4 @@
 const { centToEuro } = require('../../utils/format')
-const { getSession } = require('../../utils/session')
 const { getSnapshot, ensureFresh, invalidateSnapshot } = require('../../utils/app-snapshot')
 const { createPage } = require('../../utils/create-page')
 
@@ -64,7 +63,7 @@ createPage({
 
   onShow() {
     if (!this._hasLoadedOnce) return
-    this.hydrateFromCache()
+    this.hydrateFromCache({ allowRedirect: true })
   },
 
   async bootstrap() {
@@ -72,33 +71,37 @@ createPage({
       this.reportError('请先启用云开发')
       return
     }
-    this.hydrateFromCache()
-    const sess = await getSession()
-    this.setData({ isAdmin: !!(sess && sess.isAdmin) })
-    if (this.data.dishes.length === 0) {
-      await this.reload({ silent: true })
+    const applied = this.hydrateFromCache({ allowRedirect: true })
+    if (!applied) {
+      await this.reload({ silent: true, allowRedirect: true })
       return
     }
-    const profile = this.data.profileSummary || {}
-    const isComplete = !!profile.isComplete
-    if (!isComplete && !this._profileRedirecting) {
-      this._profileRedirecting = true
-      wx.navigateTo({
-        url: '/pages/profile-setup/index?from=index',
-        complete: () => {
-          this._profileRedirecting = false
-        },
-      })
-    }
   },
 
-  hydrateFromCache() {
+  hydrateFromCache(options = {}) {
     const cached = getSnapshot()
-    if (!cached || !Array.isArray(cached.dishes) || !cached.sale) return
-    this.applyBootstrap(cached.sale, cached.dishes, cached.profile || null)
+    if (!cached || !Array.isArray(cached.dishes) || !cached.sale) return false
+    return this.applySnapshot(cached, options)
   },
 
-  applyBootstrap(rawSale, rawDishes, rawProfile) {
+  applySnapshot(snapshot, options = {}) {
+    const allowRedirect = !!options.allowRedirect
+    const rawProfile = snapshot.profile || null
+    const profileSummary = {
+      isComplete: !!(rawProfile && rawProfile.isComplete),
+      nickname: String((rawProfile && rawProfile.nickname) || ''),
+      addressCount: Number((rawProfile && rawProfile.addressCount) || 0),
+      defaultAddressId: String((rawProfile && rawProfile.defaultAddressId) || ''),
+    }
+    if (allowRedirect && !profileSummary.isComplete) {
+      this.redirectToProfile()
+      return true
+    }
+    this.applyBootstrap(snapshot.sale, snapshot.dishes, rawProfile, snapshot.session || null)
+    return true
+  },
+
+  applyBootstrap(rawSale, rawDishes, rawProfile, rawSession) {
     const prevQtyMap = { ...(this.data.qtyMap || {}) }
     const saleInfo = {
       isOpen: !!(rawSale && rawSale.isOpen),
@@ -145,8 +148,20 @@ createPage({
       qtyMap,
       totalQty,
       totalAmountEuro: centToEuro(totalAmountCents),
+      isAdmin: !!(rawSession && rawSession.isAdmin),
       isHydrating: false,
       lastErrorMsg: '',
+    })
+  },
+
+  redirectToProfile() {
+    if (this._profileRedirecting) return
+    this._profileRedirecting = true
+    wx.navigateTo({
+      url: '/pages/profile-setup/index?from=index',
+      complete: () => {
+        this._profileRedirecting = false
+      },
     })
   },
 
@@ -169,6 +184,7 @@ createPage({
 
   async reload(options = {}) {
     const silent = !!options.silent
+    const allowRedirect = options.allowRedirect !== false
     if (!silent) this.setData({ refresherTriggered: true })
     invalidateSnapshot()
     let snapshot = null
@@ -183,20 +199,7 @@ createPage({
       this.reportError('加载菜单失败')
       return
     }
-    const sale = snapshot.sale || { isOpen: false, saleId: '', deliveryTimeSlotLabel: '' }
-    const dishes = snapshot.dishes || []
-    const profile = snapshot.profile || null
-    this.applyBootstrap(sale, dishes, profile)
-    const isComplete = !!(profile && profile.isComplete)
-    if (!isComplete && !this._profileRedirecting) {
-      this._profileRedirecting = true
-      wx.navigateTo({
-        url: '/pages/profile-setup/index?from=index',
-        complete: () => {
-          this._profileRedirecting = false
-        },
-      })
-    }
+    this.applySnapshot(snapshot, { allowRedirect })
   },
 
   onPullDownRefresh() {
@@ -270,8 +273,8 @@ createPage({
     wx.navigateTo({ url: '/pages/checkout/index' })
   },
 
-  goMyOrders() {
-    wx.navigateTo({ url: '/pages/my-orders/index' })
+  goMe() {
+    wx.navigateTo({ url: '/pages/profile-setup/index?from=me' })
   },
 
   goAdminHome() {

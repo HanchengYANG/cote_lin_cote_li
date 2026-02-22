@@ -35,6 +35,8 @@ function chooseImages(remain) {
 createPage({
   data: {
     dishId: '',
+    initialLoading: false,
+    initialLoaded: false,
     name: '',
     priceEuro: '',
     isActive: true,
@@ -48,9 +50,14 @@ createPage({
 
   async onLoad(query) {
     const dishId = (query && query.dishId) || ''
-    this.setData({ dishId })
+    this.setData({
+      dishId,
+      initialLoading: !!dishId,
+      initialLoaded: !dishId,
+    })
     if (!dishId) return
     const res = await call('admin', 'getDish', { dishId })
+    this.setData({ initialLoading: false, initialLoaded: true })
     if (!res.ok) {
       wx.showToast({ title: res.message || '加载失败', icon: 'none' })
       return

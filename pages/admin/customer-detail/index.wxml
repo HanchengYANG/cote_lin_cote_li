@@ -1,0 +1,51 @@
+<navigation-bar title="客人详情" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<sync-guard ready="{{isReady}}" error="{{syncError}}" bindretry="onSyncRetry"></sync-guard>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="page">
+    <view class="card" wx:if="{{loading}}">
+      <view class="muted">加载中...</view>
+    </view>
+
+    <block wx:elif="{{customer}}">
+      <view class="card">
+        <view class="title">基础信息</view>
+        <view class="muted small">昵称：{{customer.nicknameText}}</view>
+        <view class="muted small">OpenID：{{customer.openIdText}}</view>
+        <view class="muted small">默认电话：{{customer.defaultPhoneText}}</view>
+        <view class="muted small">默认地址：{{customer.defaultAddressText}}</view>
+      </view>
+
+      <view class="card">
+        <view class="title">地址列表</view>
+        <view class="muted small" wx:if="{{customer.addresses.length===0}}">暂无地址</view>
+        <view class="addr" wx:for="{{customer.addresses}}" wx:key="id">
+          <view class="addr-top">
+            <view class="strong">{{item.label}}</view>
+            <view class="muted small" wx:if="{{item.id===customer.defaultAddressId}}">默认</view>
+          </view>
+          <view class="muted small">{{item.fullText}}</view>
+          <view class="muted small" wx:if="{{item.phone}}">电话：{{item.phone}}</view>
+        </view>
+      </view>
+
+      <view class="card">
+        <view class="title">历史订单</view>
+        <view class="muted small" wx:if="{{orders.length===0}}">暂无订单</view>
+        <view class="order" wx:for="{{orders}}" wx:key="_id" data-id="{{item._id}}" bindtap="goOrderDetail">
+          <view class="order-top">
+            <view class="tag {{item.statusClass}}">{{item.statusText}}</view>
+            <view class="muted small">{{item.createdAtText}}</view>
+          </view>
+          <view class="muted small">订单号：{{item._id}}</view>
+          <view class="muted small">{{item.fulfillmentText}} · €{{item.totals.amountEuro}}（{{item.totals.qty}}件）</view>
+          <view class="muted small" wx:if="{{item.phoneText && item.phoneText!=='-'}}">电话：{{item.phoneText}}</view>
+          <view class="muted small" wx:if="{{item.fulfillmentType==='delivery' && item.addressText}}">地址：{{item.addressText}}</view>
+        </view>
+      </view>
+    </block>
+
+    <view class="card" wx:else>
+      <view class="muted">暂无客人信息</view>
+    </view>
+  </view>
+</scroll-view>

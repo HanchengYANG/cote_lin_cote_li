@@ -9,7 +9,10 @@
       </picker>
     </view>
 
-    <view class="card" wx:if="{{orders.length===0 && !loading}}">
+    <view class="card" wx:if="{{initialLoading}}">
+      <view class="muted">载入中...</view>
+    </view>
+    <view class="card" wx:elif="{{orders.length===0 && !loading}}">
       <view class="muted">暂无订单</view>
     </view>
 

@@ -3,6 +3,12 @@
 <scroll-view class="scrollarea" scroll-y type="list">
   <view class="page">
     <view class="card" wx:if="{{order}}">
+      <view class="title">客人信息</view>
+      <view class="muted small">昵称：{{order.customerNickname || '未设置昵称'}}</view>
+      <view class="muted small">OpenID：{{order.customerOpenId || '-'}}</view>
+    </view>
+
+    <view class="card" wx:if="{{order}}">
       <view class="title">交货方式设置</view>
       <radio-group bindchange="onFulfillmentChange">
         <label class="radio">

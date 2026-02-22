@@ -1,72 +1,60 @@
 const { call } = require('../../utils/api')
-const { normalizePhone } = require('../../utils/phone')
-const { normalizeFrAddress, isFrAddressValid } = require('../../utils/fr-address')
-const { suggestAddressDirect } = require('../../utils/address-suggest')
+const { normalizePhone, isPhoneValid } = require('../../utils/phone')
+const { invalidateSnapshot } = require('../../utils/app-snapshot')
 const { createPage } = require('../../utils/create-page')
 
-function normalizeAddress(a) {
-  const normalized = normalizeFrAddress(a)
-  return normalized || {
-    label: '',
-    line1: '',
-    line2: '',
-    postalCode: '',
-    city: '',
-    phone: '',
-    country: 'FR',
-  }
-}
-
-function line1FromSuggestion(suggestion) {
-  const raw = String((suggestion && (suggestion.line1 || suggestion.label)) || '').trim()
-  const parts = raw.split(/\s+/).filter(Boolean)
-  if (parts.length >= 2 && String(parts[0]).toLowerCase() === String(parts[1]).toLowerCase()) {
-    parts.splice(1, 1)
-  }
-  return parts.join(' ')
+function buildDefaultAddressSummary(address) {
+  if (!address) return '未设置默认地址'
+  const label = String(address.label || '').trim() || '未命名地址'
+  const city = String(address.city || '').trim() || '-'
+  const phone = String(address.phone || '').trim() || '-'
+  return `${label} · ${city} · ${phone}`
 }
 
 createPage({
   data: {
     from: '',
+    pageTitle: '我的',
     loading: false,
+    initialLoading: true,
+    initialLoaded: false,
     saving: false,
     nickname: '',
-    address: {
-      label: '',
-      line1: '',
-      line2: '',
-      postalCode: '',
-      city: '',
-      phone: '',
-      country: 'FR',
-    },
-    suggestions: [],
-    line1Focused: false,
+    profilePhone: '',
+    defaultAddressSummary: '未设置默认地址',
   },
 
-  async onLoad(query) {
-    this._suggestReqId = 0
-    this._timer = null
-    this._isPickingSuggestion = false
-    this.setData({ from: String((query && query.from) || '') })
-    await this.reload()
+  onLoad(query) {
+    const from = String((query && query.from) || '')
+    const pageTitle = from === 'checkout' ? '完善资料' : '我的'
+    this.setData({ from, pageTitle })
+  },
+
+  onShow() {
+    this.reload()
   },
 
   async reload() {
     this.setData({ loading: true })
+    const finishInitialLoad = () => {
+      if (this.data.initialLoading || !this.data.initialLoaded) {
+        this.setData({ initialLoading: false, initialLoaded: true })
+      }
+    }
     const res = await call('customer', 'getMyProfile')
     this.setData({ loading: false })
+    finishInitialLoad()
     if (!res.ok || !res.data || !res.data.profile) {
       wx.showToast({ title: res.message || '加载失败', icon: 'none' })
       return
     }
     const p = res.data.profile
     const addresses = Array.isArray(p.addresses) ? p.addresses : []
-    const current = addresses.find((x) => x.id === p.defaultAddressId) || addresses[0] || null
+    const current = addresses.find((x) => String(x.id || '') === String(p.defaultAddressId || '')) || addresses[0] || null
     this.setData({
       nickname: String(p.nickname || ''),
-      address: normalizeAddress(current),
+      profilePhone: String(p.profilePhone || ''),
+      defaultAddressSummary: buildDefaultAddressSummary(current),
     })
   },
 
@@ -74,131 +62,40 @@ createPage({
     this.setData({ nickname: e.detail.value })
   },
 
-  pickWechatNickname() {
-    wx.getUserProfile({
-      desc: '用于订单称呼展示',
-      success: (res) => {
-        const nick = String((res && res.userInfo && res.userInfo.nickName) || '').trim()
-        if (nick) this.setData({ nickname: nick })
-      },
-      fail: () => {},
-    })
-  },
-
-  onAddrInput(e) {
-    const k = e.currentTarget.dataset.k
-    const address = { ...this.data.address, [k]: e.detail.value }
-    this.setData({ address })
-  },
-
-  onLine1Input(e) {
-    const value = e.detail.value
-    const address = { ...this.data.address, line1: value }
-    this.setData({ address })
-    if (this._isPickingSuggestion) return
-    this.debouncedSuggest(value)
-  },
-
-  onLine1Focus() {
-    this.setData({ line1Focused: true })
-  },
-
-  onLine1Blur() {
-    if (this._isPickingSuggestion) return
-    this.setData({ line1Focused: false, suggestions: [] })
-  },
-
-  onSuggestionTouchStart() {
-    this._isPickingSuggestion = true
-  },
-
-  debouncedSuggest(q) {
-    const s = String(q || '').trim()
-    if (this._timer) clearTimeout(this._timer)
-    if (s.length < 3) {
-      this.setData({ suggestions: [] })
-      return
-    }
-    const reqId = (this._suggestReqId || 0) + 1
-    this._suggestReqId = reqId
-    this._timer = setTimeout(() => {
-      this.fetchSuggestions(s, reqId)
-    }, 250)
-  },
-
-  async fetchSuggestions(q, reqId) {
-    const res = await suggestAddressDirect(q, 5)
-    if (reqId !== this._suggestReqId) return
-    if (this._isPickingSuggestion || !this.data.line1Focused) return
-    const latestLine1 = String((this.data.address && this.data.address.line1) || '').trim()
-    if (latestLine1 !== String(q || '').trim()) return
-    if (!res.ok || !Array.isArray(res.suggestions)) {
-      this.setData({ suggestions: [] })
-      return
-    }
-    this.setData({ suggestions: res.suggestions })
-  },
-
-  pickSuggestion(e) {
-    if (this._timer) clearTimeout(this._timer)
-    this._timer = null
-    this._suggestReqId = (this._suggestReqId || 0) + 1
-    const idx = Number(e.currentTarget.dataset.i)
-    const s = (this.data.suggestions || [])[idx]
-    if (!s) {
-      this._isPickingSuggestion = false
-      return
-    }
-    const nextLine1 = line1FromSuggestion(s)
-    const address = {
-      ...this.data.address,
-      line1: nextLine1,
-      postalCode: s.postalCode || '',
-      city: s.city || '',
-    }
-    this.setData({
-      address,
-      suggestions: [],
-      line1Focused: false,
-    })
-    wx.hideKeyboard({
-      complete: () => {
-        this._isPickingSuggestion = false
-      },
-    })
-  },
-
-  onUnload() {
-    if (this._timer) clearTimeout(this._timer)
-    this._timer = null
-    this._isPickingSuggestion = false
+  onPhoneInput(e) {
+    const profilePhone = normalizePhone(e && e.detail && e.detail.value)
+    this.setData({ profilePhone })
   },
 
   async save() {
     if (this.data.saving) return
     const nickname = String(this.data.nickname || '').trim()
-    const address = normalizeAddress(this.data.address)
-    address.phone = normalizePhone(address.phone)
+    const profilePhone = normalizePhone(this.data.profilePhone)
     if (!nickname) {
       wx.showToast({ title: '请填写昵称', icon: 'none' })
       return
     }
-    if (!isFrAddressValid(address, { requirePhone: true, requireLabel: true })) {
-      wx.showToast({ title: '请填写完整地址和电话', icon: 'none' })
+    if (profilePhone && !isPhoneValid(profilePhone)) {
+      wx.showToast({ title: '电话格式不正确', icon: 'none' })
       return
     }
     this.setData({ saving: true })
-    const res = await call('customer', 'completeMyProfile', { nickname, address })
+    const res = await call('customer', 'updateMyNickname', { nickname, profilePhone })
     this.setData({ saving: false })
     if (!res.ok) {
       wx.showToast({ title: res.message || '保存失败', icon: 'none' })
       return
     }
+    invalidateSnapshot()
     wx.showToast({ title: '已保存', icon: 'success' })
     wx.navigateBack()
   },
 
   goAddressBook() {
     wx.navigateTo({ url: '/pages/address-book/index' })
+  },
+
+  goMyOrders() {
+    wx.navigateTo({ url: '/pages/my-orders/index' })
   },
 })

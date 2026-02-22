@@ -1,39 +1,37 @@
-<navigation-bar title="完善资料" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<navigation-bar title="{{pageTitle}}" back="{{true}}" color="black" background="#FFF"></navigation-bar>
 <sync-guard ready="{{isReady}}" error="{{syncError}}" bindretry="onSyncRetry"></sync-guard>
 <scroll-view class="scrollarea" scroll-y type="list">
   <view class="page">
-    <view class="card">
-      <view class="title">昵称</view>
-      <input class="input" placeholder="请输入你的昵称" value="{{nickname}}" bindinput="onNickInput" />
-      <button class="btn ghost mini" bindtap="pickWechatNickname">读取微信昵称</button>
+    <view class="card" wx:if="{{initialLoading}}">
+      <view class="muted">载入中...</view>
     </view>
+    <block wx:else>
+      <view class="card">
+        <view class="title">常用功能</view>
+        <view class="action-row">
+          <button class="btn ghost half-btn" bindtap="goMyOrders">我的订单</button>
+          <button class="btn ghost half-btn" bindtap="goAddressBook">地址管理</button>
+        </view>
+        <view class="muted small">微信号小程序无法自动获取，店主将通过你填写的电话联系你。</view>
+      </view>
 
-    <view class="card">
-      <view class="row">
+      <view class="card">
+        <view class="title">昵称</view>
+        <input class="input" type="nickname" placeholder="请输入昵称" value="{{nickname}}" bindinput="onNickInput" />
+      </view>
+
+      <view class="card">
+        <view class="title">联系电话（自取用）</view>
+        <input class="input" placeholder="可选，填写后自取下单可自动带出" value="{{profilePhone}}" bindinput="onPhoneInput" />
+      </view>
+
+      <view class="card">
         <view class="title">默认地址</view>
-        <button class="btn ghost mini" bindtap="goAddressBook">地址簿</button>
+        <view class="muted">{{defaultAddressSummary}}</view>
+        <view class="muted small">如需修改默认地址，请进入“地址管理”。</view>
       </view>
-      <input class="input" placeholder="地址名称（如：家 / 公司）" value="{{address.label}}" data-k="label" bindinput="onAddrInput" />
-      <input
-        class="input"
-        placeholder="Street address (line 1)"
-        value="{{address.line1}}"
-        focus="{{line1Focused}}"
-        bindfocus="onLine1Focus"
-        bindblur="onLine1Blur"
-        bindinput="onLine1Input"
-      />
-      <view class="sug" wx:if="{{suggestions.length>0}}">
-        <view class="sug-item" wx:for="{{suggestions}}" wx:key="index" data-i="{{index}}" bindtouchstart="onSuggestionTouchStart" bindtap="pickSuggestion">{{item.label}}</view>
-      </view>
-      <input class="input" placeholder="Apartment / interphone (optional)" value="{{address.line2}}" data-k="line2" bindinput="onAddrInput" />
-      <view class="row2">
-        <input class="input half" placeholder="Postal code" value="{{address.postalCode}}" data-k="postalCode" bindinput="onAddrInput" />
-        <input class="input half" placeholder="City / Ville" value="{{address.city}}" data-k="city" bindinput="onAddrInput" />
-      </view>
-      <input class="input" placeholder="电话（如 +33612345678）" value="{{address.phone}}" data-k="phone" bindinput="onAddrInput" />
-    </view>
 
-    <button class="btn" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存</button>
+      <button class="btn" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存</button>
+    </block>
   </view>
 </scroll-view>

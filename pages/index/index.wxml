@@ -49,7 +49,7 @@
         <view class="sum">合计 €{{totalAmountEuro}}</view>
       </view>
       <view class="bottom-actions">
-        <button class="btn ghost my-orders-btn" bindtap="goMyOrders">我的订单</button>
+        <button class="btn ghost my-orders-btn" bindtap="goMe">我的</button>
         <button class="btn checkout-btn" disabled="{{totalQty===0}}" bindtap="goCheckout">去结算</button>
       </view>
     </view>

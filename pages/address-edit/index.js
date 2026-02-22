@@ -1,8 +1,22 @@
 const { call } = require('../../utils/api')
+const { invalidateSnapshot } = require('../../utils/app-snapshot')
 const { normalizePhone } = require('../../utils/phone')
 const { normalizeFrAddress, isFrAddressValid } = require('../../utils/fr-address')
 const { suggestAddressDirect } = require('../../utils/address-suggest')
 const { createPage } = require('../../utils/create-page')
+
+const CHECKOUT_PROFILE_DIRTY_KEY = 'checkout_profile_dirty'
+
+function setCheckoutProfileDirty(payload) {
+  try {
+    wx.setStorageSync(CHECKOUT_PROFILE_DIRTY_KEY, JSON.stringify({
+      ...(payload || {}),
+      ts: Date.now(),
+    }))
+  } catch (e) {
+    wx.setStorageSync(CHECKOUT_PROFILE_DIRTY_KEY, '1')
+  }
+}
 
 function normalizeAddress(a) {
   const normalized = normalizeFrAddress(a)
@@ -30,6 +44,8 @@ createPage({
   data: {
     addressId: '',
     saving: false,
+    initialLoading: false,
+    initialLoaded: false,
     isEdit: false,
     address: {
       label: '',
@@ -50,9 +66,15 @@ createPage({
     this._timer = null
     this._isPickingSuggestion = false
     const addressId = String((query && query.addressId) || '').trim()
-    this.setData({ addressId, isEdit: !!addressId })
+    this.setData({
+      addressId,
+      isEdit: !!addressId,
+      initialLoading: !!addressId,
+      initialLoaded: !addressId,
+    })
     if (!addressId) return
     const res = await call('customer', 'getMyProfile')
+    this.setData({ initialLoading: false, initialLoaded: true })
     if (!res.ok || !res.data || !res.data.profile) {
       wx.showToast({ title: res.message || '加载失败', icon: 'none' })
       return
@@ -190,6 +212,11 @@ createPage({
       wx.showToast({ title: res.message || '保存失败', icon: 'none' })
       return
     }
+    invalidateSnapshot()
+    setCheckoutProfileDirty({
+      reason: 'address_saved',
+      addressId: String(this.data.addressId || ''),
+    })
     wx.showToast({ title: '已保存', icon: 'success' })
     wx.navigateBack()
   },

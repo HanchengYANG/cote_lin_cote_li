@@ -1,0 +1,26 @@
+<navigation-bar title="客人管理" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<sync-guard ready="{{isReady}}" error="{{syncError}}" bindretry="onSyncRetry"></sync-guard>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="page">
+    <view class="card" wx:if="{{loading}}">
+      <view class="muted">加载中...</view>
+    </view>
+
+    <view class="card" wx:elif="{{customers.length===0}}">
+      <view class="muted">暂无客人数据</view>
+    </view>
+
+    <view class="list" wx:else>
+      <view class="item" wx:for="{{customers}}" wx:key="customerOpenId" data-id="{{item.customerOpenId}}" bindtap="goDetail">
+        <view class="top">
+          <view class="name">{{item.nicknameText}}</view>
+          <view class="muted small">订单 {{item.orderCountText}}</view>
+        </view>
+        <view class="muted small">OpenID：{{item.openIdText}}</view>
+        <view class="muted small">电话：{{item.phoneText}}</view>
+        <view class="muted small">地址数：{{item.addressCountText}}</view>
+        <view class="muted small">最近下单：{{item.lastOrderAtText}}</view>
+      </view>
+    </view>
+  </view>
+</scroll-view>

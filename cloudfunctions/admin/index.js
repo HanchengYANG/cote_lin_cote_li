@@ -146,6 +146,38 @@ async function getDishesByIds(ids) {
   return out
 }
 
+function toEpochMs(input) {
+  if (!input) return 0
+  if (typeof input === 'number' && Number.isFinite(input)) return input
+  const d = new Date(input)
+  const t = d.getTime()
+  return Number.isFinite(t) ? t : 0
+}
+
+async function getCustomersByOpenIds(openIds) {
+  const ids = Array.from(new Set((openIds || []).map((x) => String(x || '').trim()).filter(Boolean)))
+  if (ids.length === 0) return []
+  const chunkSize = 50
+  const out = []
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize)
+    try {
+      const r = await db.collection('customers').where({ _id: _.in(chunk) }).get()
+      out.push(...(r.data || []))
+    } catch (err) {
+      // Ignore missing/invalid customers collection and fallback to anonymous display.
+    }
+  }
+  return out
+}
+
+function pickDefaultPhone(addresses, defaultAddressId) {
+  const arr = normalizeStoredAddresses(addresses)
+  const defaultId = String(defaultAddressId || '').trim()
+  const picked = arr.find((x) => String((x && x.id) || '').trim() === defaultId) || arr[0] || null
+  return normalizePhone(picked && picked.phone)
+}
+
 exports.main = async (event) => {
   const { action } = event || {}
   const wxContext = cloud.getWXContext()
@@ -1034,22 +1066,11 @@ exports.main = async (event) => {
       )
     )
     const nicknameByOpenId = {}
-    const chunkSize = 50
-    for (let i = 0; i < openIds.length; i += chunkSize) {
-      const chunk = openIds.slice(i, i + chunkSize)
-      try {
-        const customerRes = await db
-          .collection('customers')
-          .where({ _id: _.in(chunk) })
-          .get()
-        for (const c of customerRes.data || []) {
-          const id = String((c && c._id) || '').trim()
-          if (!id) continue
-          nicknameByOpenId[id] = String((c && c.nickname) || '').trim()
-        }
-      } catch (err) {
-        // Ignore missing/invalid customers collection and fallback to anonymous display.
-      }
+    const customers = await getCustomersByOpenIds(openIds)
+    for (const c of customers) {
+      const id = String((c && c._id) || '').trim()
+      if (!id) continue
+      nicknameByOpenId[id] = String((c && c.nickname) || '').trim()
     }
     const withCustomer = orders.map((o) => {
       const id = String((o && o.customerOpenId) || '').trim()
@@ -1061,6 +1082,108 @@ exports.main = async (event) => {
     return ok({ orders: withCustomer })
   }
 
+  if (action === 'listCustomers') {
+    let customers = []
+    try {
+      const r = await db.collection('customers').limit(500).get()
+      customers = r.data || []
+    } catch (err) {
+      customers = []
+    }
+    const openIds = Array.from(new Set(customers.map((c) => String((c && c._id) || '').trim()).filter(Boolean)))
+    const statsByOpenId = new Map()
+    const chunkSize = 20
+    for (let i = 0; i < openIds.length; i += chunkSize) {
+      const chunk = openIds.slice(i, i + chunkSize)
+      let orders = []
+      try {
+        const r = await db.collection('orders').where({ customerOpenId: _.in(chunk) }).limit(500).get()
+        orders = r.data || []
+      } catch (err) {
+        orders = []
+      }
+      for (const o of orders) {
+        const id = String((o && o.customerOpenId) || '').trim()
+        if (!id) continue
+        const prev = statsByOpenId.get(id) || { orderCount: 0, lastOrderAtMs: 0, lastOrderAt: null }
+        const curMs = toEpochMs(o && o.createdAt)
+        const next = {
+          orderCount: prev.orderCount + 1,
+          lastOrderAtMs: prev.lastOrderAtMs,
+          lastOrderAt: prev.lastOrderAt,
+        }
+        if (curMs >= prev.lastOrderAtMs) {
+          next.lastOrderAtMs = curMs
+          next.lastOrderAt = o && o.createdAt ? o.createdAt : null
+        }
+        statsByOpenId.set(id, next)
+      }
+    }
+
+    const rows = customers.map((c) => {
+      const customerOpenId = String((c && c._id) || '').trim()
+      const nickname = String((c && c.nickname) || '').trim()
+      const addresses = normalizeStoredAddresses(c && c.addresses)
+      const defaultAddressId = String((c && c.defaultAddressId) || '').trim()
+      const stats = statsByOpenId.get(customerOpenId) || { orderCount: 0, lastOrderAt: null, lastOrderAtMs: 0 }
+      return {
+        customerOpenId,
+        nickname,
+        addressCount: addresses.length,
+        defaultPhone: pickDefaultPhone(addresses, defaultAddressId),
+        orderCount: stats.orderCount,
+        lastOrderAt: stats.lastOrderAt || null,
+        updatedAt: (c && c.updatedAt) || null,
+      }
+    })
+
+    rows.sort((a, b) => {
+      const ta = toEpochMs(a.lastOrderAt) || toEpochMs(a.updatedAt)
+      const tb = toEpochMs(b.lastOrderAt) || toEpochMs(b.updatedAt)
+      return tb - ta
+    })
+    return ok({ customers: rows })
+  }
+
+  if (action === 'getCustomerDetail') {
+    const customerOpenId = String(event.customerOpenId || '').trim()
+    if (!customerOpenId) return fail('BAD_REQUEST', 'Missing customerOpenId')
+    let customer = null
+    try {
+      const r = await db.collection('customers').doc(customerOpenId).get()
+      customer = r.data || null
+    } catch (err) {
+      customer = null
+    }
+    if (!customer) return fail('NOT_FOUND', 'Customer not found')
+
+    let orders = []
+    try {
+      const r = await db.collection('orders').where({ customerOpenId }).limit(500).get()
+      orders = r.data || []
+    } catch (err) {
+      orders = []
+    }
+    orders.sort((a, b) => toEpochMs(b && b.createdAt) - toEpochMs(a && a.createdAt))
+
+    const nickname = String((customer && customer.nickname) || '').trim()
+    const withCustomer = orders.map((o) => ({
+      ...o,
+      customerNickname: nickname,
+    }))
+
+    return ok({
+      customer: {
+        customerOpenId,
+        nickname,
+        defaultAddressId: String((customer && customer.defaultAddressId) || '').trim(),
+        addresses: normalizeStoredAddresses(customer && customer.addresses),
+        updatedAt: customer && customer.updatedAt ? customer.updatedAt : null,
+      },
+      orders: withCustomer,
+    })
+  }
+
   if (action === 'getOrderDetail') {
     const { orderId } = event
     if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
@@ -1069,15 +1192,18 @@ exports.main = async (event) => {
       const order = r.data || null
       if (!order) return fail('ORDER_NOT_FOUND', 'Order not found')
       let customerAddresses = []
+      let customerNickname = ''
       if (order.customerOpenId) {
         try {
           const customerRes = await db.collection('customers').doc(order.customerOpenId).get()
+          customerNickname = String((customerRes && customerRes.data && customerRes.data.nickname) || '').trim()
           customerAddresses = normalizeStoredAddresses(customerRes && customerRes.data && customerRes.data.addresses)
         } catch (err) {
+          customerNickname = ''
           customerAddresses = []
         }
       }
-      return ok({ order, customerAddresses })
+      return ok({ order: { ...order, customerNickname }, customerAddresses })
     } catch (err) {
       return fail('ORDER_NOT_FOUND', 'Order not found')
     }
