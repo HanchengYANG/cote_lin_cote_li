@@ -1,13 +1,74 @@
 const { call } = require('../../../utils/api')
-const { formatTime } = require('../../../utils/format')
-const { wxp } = require('../../../utils/wxprom')
+const { formatTime, centToEuro } = require('../../../utils/format')
 const { createPage } = require('../../../utils/create-page')
 
-const TYPE_OPTIONS = [
-  { label: '订单明细', value: 'ORDER_DETAIL' },
-  { label: '菜品汇总', value: 'DISH_SUMMARY' },
-  { label: '客户与地址清单', value: 'CUSTOMER_ADDRESS' },
-]
+function buildSaleLabel(sale) {
+  if (!sale) return '未知开单'
+  const status = String(sale.status || '').trim() || 'UNKNOWN'
+  const ts = formatTime(sale.createdAt)
+  return `${status}${ts ? ` ${ts}` : ''}`
+}
+
+function toSafeInt(n, fallback = 0) {
+  const v = Number(n)
+  if (!Number.isFinite(v)) return fallback
+  return Math.floor(v)
+}
+
+function mapReview(data) {
+  const raw = data || {}
+  const sale = raw.sale || null
+  const summary = raw.summary || {}
+  const dishSales = Array.isArray(raw.dishSales) ? raw.dishSales : []
+  const orders = Array.isArray(raw.orders) ? raw.orders : []
+
+  return {
+    sale: sale
+      ? {
+          ...sale,
+          createdAtLabel: formatTime(sale.createdAt),
+          deliveryTimeSlotLabel: String(sale.deliveryTimeSlotLabel || '').trim(),
+        }
+      : null,
+    summary: {
+      orderCount: toSafeInt(summary.orderCount, 0),
+      totalQty: toSafeInt(summary.totalQty, 0),
+      revenueCents: toSafeInt(summary.revenueCents, 0),
+      revenueEuro: centToEuro(toSafeInt(summary.revenueCents, 0)),
+    },
+    dishSales: dishSales.map((it) => {
+      const qty = toSafeInt(it && it.qty, 0)
+      const amountCents = toSafeInt(it && it.amountCents, 0)
+      return {
+        dishId: String((it && it.dishId) || ''),
+        dishName: String((it && it.dishName) || '未知菜品'),
+        qty,
+        amountCents,
+        amountEuro: centToEuro(amountCents),
+      }
+    }),
+    orders: orders.map((o) => {
+      const amountCents = toSafeInt(o && o.totals && o.totals.amountCents, 0)
+      const qty = toSafeInt(o && o.totals && o.totals.qty, 0)
+      const items = Array.isArray(o && o.items) ? o.items : []
+      return {
+        ...o,
+        customerNickname: String((o && o.customerNickname) || '').trim() || '匿名客户',
+        createdAtLabel: formatTime(o && o.createdAt),
+        fulfillmentLabel: String((o && o.fulfillmentType) || '') === 'delivery' ? '配送' : '自取',
+        phone: String((o && o.contact && o.contact.phone) || ''),
+        addressText: String((o && o.addressText) || ''),
+        remark: String((o && o.remark) || ''),
+        itemSummary: items.map((it) => `${it.dishName} x${it.qty}`).join('；'),
+        totals: {
+          qty,
+          amountCents,
+          amountEuro: centToEuro(amountCents),
+        },
+      }
+    }),
+  }
+}
 
 createPage({
   data: {
@@ -16,16 +77,14 @@ createPage({
     saleOptions: [{ label: '加载中...', value: '' }],
     saleIndex: 0,
     saleLabel: '加载中...',
-    typeOptions: TYPE_OPTIONS,
-    typeIndex: 0,
-    typeLabel: TYPE_OPTIONS[0].label,
-    includeCancelled: false,
-    exporting: false,
-    canExport: false,
+    loadingReview: false,
+    reviewLoaded: false,
+    review: null,
+    hasSaleSelection: false,
   },
 
   onLoad(query) {
-    this.prefSaleId = (query && query.saleId) || ''
+    this.prefSaleId = String((query && query.saleId) || '').trim()
   },
 
   onShow() {
@@ -38,76 +97,95 @@ createPage({
         this.setData({ initialLoading: false, initialLoaded: true })
       }
     }
+
     const salesRes = await call('admin', 'listSales', { limit: 50 })
     if (!salesRes.ok) {
       finishInitialLoad()
+      this.setData({
+        saleOptions: [{ label: '加载失败', value: '' }],
+        saleIndex: 0,
+        saleLabel: '加载失败',
+        hasSaleSelection: false,
+        review: null,
+        reviewLoaded: true,
+        loadingReview: false,
+      })
       wx.showToast({ title: salesRes.message || '加载失败', icon: 'none' })
       return
     }
-    const sales = salesRes.data.sales || []
+
+    const sales = (Array.isArray(salesRes.data && salesRes.data.sales) ? salesRes.data.sales : []).filter(
+      (s) => String((s && s.status) || '').trim() !== 'DRAFT'
+    )
     const opts = sales.map((s) => ({
-      label: `${s.status} ${formatTime(s.createdAt)}`,
-      value: s._id,
+      label: buildSaleLabel(s),
+      value: String(s._id || ''),
     }))
-    if (opts.length === 0) opts.push({ label: '暂无开单', value: '' })
+    if (!opts.length) opts.push({ label: '暂无开单', value: '' })
+
     let saleIndex = 0
     if (this.prefSaleId) {
       const idx = opts.findIndex((o) => o.value === this.prefSaleId)
-      saleIndex = idx >= 0 ? idx : 0
+      if (idx >= 0) saleIndex = idx
+    } else if (this.data.saleOptions.length && this.data.saleOptions[0].value) {
+      const currentValue = this.data.saleOptions[this.data.saleIndex] && this.data.saleOptions[this.data.saleIndex].value
+      const idx = opts.findIndex((o) => o.value === currentValue)
+      if (idx >= 0) saleIndex = idx
     }
-    this.setData({ saleOptions: opts, saleIndex })
-    this.recompute()
+
+    const picked = opts[saleIndex] || { label: '未选择', value: '' }
+    this.setData({
+      saleOptions: opts,
+      saleIndex,
+      saleLabel: picked.label || '未选择',
+      hasSaleSelection: !!picked.value,
+      review: null,
+      reviewLoaded: false,
+    })
     finishInitialLoad()
+    await this.loadReview()
   },
 
   onPickSale(e) {
-    this.setData({ saleIndex: Number(e.detail.value || 0) })
-    this.recompute()
-  },
-
-  onPickType(e) {
-    this.setData({ typeIndex: Number(e.detail.value || 0) })
-    this.recompute()
-  },
-
-  onIncludeCancelled(e) {
-    this.setData({ includeCancelled: !!(e.detail.value && e.detail.value.length) })
-  },
-
-  recompute() {
-    const saleId = this.data.saleOptions[this.data.saleIndex] && this.data.saleOptions[this.data.saleIndex].value
-    const saleLabel =
-      (this.data.saleOptions[this.data.saleIndex] && this.data.saleOptions[this.data.saleIndex].label) || '未选择'
-    const typeLabel =
-      (this.data.typeOptions[this.data.typeIndex] && this.data.typeOptions[this.data.typeIndex].label) || '未选择'
-    this.setData({ canExport: !!saleId, saleLabel, typeLabel })
-  },
-
-  async doExport() {
-    if (!this.data.canExport || this.data.exporting) return
-    const saleId = this.data.saleOptions[this.data.saleIndex].value
-    const exportType = this.data.typeOptions[this.data.typeIndex].value
-    this.setData({ exporting: true })
-    const res = await call('admin', 'export', {
-      saleId,
-      exportType,
-      includeCancelled: !!this.data.includeCancelled,
+    const saleIndex = Number(e.detail.value || 0)
+    const picked = this.data.saleOptions[saleIndex] || { label: '未选择', value: '' }
+    this.setData({
+      saleIndex,
+      saleLabel: picked.label || '未选择',
+      hasSaleSelection: !!picked.value,
+      review: null,
+      reviewLoaded: false,
     })
-    this.setData({ exporting: false })
-    if (!res.ok) {
-      wx.showToast({ title: res.message || '导出失败', icon: 'none' })
+    this.loadReview()
+  },
+
+  goOrderDetail(e) {
+    const orderId = String((e.currentTarget.dataset && e.currentTarget.dataset.id) || '').trim()
+    if (!orderId) return
+    wx.navigateTo({ url: `/pages/admin/order-detail/index?orderId=${encodeURIComponent(orderId)}` })
+  },
+
+  async loadReview() {
+    const picked = this.data.saleOptions[this.data.saleIndex] || null
+    const saleId = String((picked && picked.value) || '').trim()
+    if (!saleId) {
+      this.setData({ loadingReview: false, review: null, reviewLoaded: true })
       return
     }
-    const fileID = res.data.fileID
-    const fileType = 'xls'
-    wx.showLoading({ title: '下载中...' })
-    try {
-      const dl = await wxp(wx.cloud.downloadFile, { fileID })
-      wx.hideLoading()
-      await wxp(wx.openDocument, { filePath: dl.tempFilePath, fileType, showMenu: true })
-    } catch (err) {
-      wx.hideLoading()
-      wx.showToast({ title: (err && err.errMsg) || '打开失败', icon: 'none' })
+    if (this.data.loadingReview) return
+
+    this.setData({ loadingReview: true })
+    const res = await call('admin', 'getSaleReview', { saleId })
+    if (!res.ok) {
+      this.setData({ loadingReview: false, review: null, reviewLoaded: true })
+      wx.showToast({ title: res.message || '加载失败', icon: 'none' })
+      return
     }
+
+    this.setData({
+      loadingReview: false,
+      reviewLoaded: true,
+      review: mapReview(res.data),
+    })
   },
 })

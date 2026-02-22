@@ -21,7 +21,7 @@
     </view>
 
     <view wx:elif="{{dishes.length>0}}" class="dish-list">
-      <view class="dish-row" wx:for="{{dishes}}" wx:key="_id">
+      <view class="dish-row {{saleInfo.isOpen && !item.inSale ? 'state-muted' : ''}} {{item.isSoldOut ? 'state-soldout' : ''}}" wx:for="{{dishes}}" wx:key="_id">
         <view class="dish-left" bindtap="goDishDetail" data-id="{{item._id}}">
           <image wx:if="{{item.thumb}}" class="dish-thumb" mode="aspectFill" src="{{item.thumb}}" />
           <view wx:else class="dish-thumb placeholder">暂无图片</view>

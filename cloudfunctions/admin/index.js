@@ -63,25 +63,6 @@ async function requireAdmin(openId) {
   return cfg
 }
 
-function escapeHtml(s) {
-  return String(s || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-function asExcelHtml(title, rows) {
-  const head = `<tr>${rows.headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`
-  const body = rows.rows
-    .map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`)
-    .join('')
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(
-    title
-  )}</title></head><body><table border="1">${head}${body}</table></body></html>`
-}
-
 async function getTempUrlMap(fileIDs) {
   const ids = Array.from(new Set((fileIDs || []).filter(Boolean)))
   if (ids.length === 0) return new Map()
@@ -311,16 +292,40 @@ exports.main = async (event) => {
     const activeSaleId = cfg.activeSaleId
     let activeSale = null
     let orderCount = 0
+    let activeSaleDishStats = []
     if (activeSaleId) {
       try {
         activeSale = await getSale(activeSaleId)
         const o = await db.collection('orders').where({ saleId: activeSaleId }).limit(500).get()
         orderCount = (o.data || []).filter((x) => x.status === ORDER_STATUS.ACTIVE).length
+        const dishConfigs = normalizeDishConfigs(activeSale && activeSale.dishConfigs)
+        if (dishConfigs.length > 0) {
+          const dishes = await getDishesByIds(dishConfigs.map((x) => x.dishId))
+          const dishNameMap = new Map((dishes || []).map((d) => [String(d._id || ''), String(d.name || d._id || '')]))
+          activeSaleDishStats = dishConfigs
+            .map((cfgItem) => {
+              const dishId = String(cfgItem.dishId || '')
+              const soldQty = toSafeInt(cfgItem.soldQty, 0)
+              const limitQty = toSafeInt(cfgItem.limitQty, 0)
+              return {
+                dishId,
+                dishName: dishNameMap.get(dishId) || dishId || '未知菜品',
+                soldQty,
+                limitQty,
+                remainingQty: Math.max(0, limitQty - soldQty),
+              }
+            })
+            .sort((a, b) => {
+              if (b.soldQty !== a.soldQty) return b.soldQty - a.soldQty
+              return String(a.dishName || '').localeCompare(String(b.dishName || ''))
+            })
+        }
       } catch (err) {
         activeSale = null
+        activeSaleDishStats = []
       }
     }
-    return ok({ activeSale, stats: { orderCount } })
+    return ok({ activeSale, stats: { orderCount }, activeSaleDishStats })
   }
 
   if (action === 'getActiveSaleEditor') {
@@ -1082,6 +1087,135 @@ exports.main = async (event) => {
     return ok({ orders: withCustomer })
   }
 
+  if (action === 'getSaleReview') {
+    const saleId = String(event.saleId || '').trim()
+    if (!saleId) return fail('BAD_REQUEST', 'Missing saleId')
+
+    let sale = null
+    try {
+      sale = await getSale(saleId)
+    } catch (err) {
+      sale = null
+    }
+    if (!sale) return fail('NOT_FOUND', 'Sale not found')
+    if (String((sale && sale.status) || '').trim() === 'DRAFT') {
+      return fail('BAD_REQUEST', 'Draft sale is not reviewable')
+    }
+
+    const orderRes = await db.collection('orders').where({ saleId, status: ORDER_STATUS.ACTIVE }).limit(500).get()
+    const rawOrders = orderRes.data || []
+    rawOrders.sort((a, b) => toEpochMs(a && a.createdAt) - toEpochMs(b && b.createdAt))
+
+    const customerOpenIds = Array.from(
+      new Set(
+        rawOrders
+          .map((o) => String((o && o.customerOpenId) || '').trim())
+          .filter(Boolean)
+      )
+    )
+    const customerList = await getCustomersByOpenIds(customerOpenIds)
+    const nicknameByOpenId = new Map()
+    for (const c of customerList) {
+      const id = String((c && c._id) || '').trim()
+      if (!id) continue
+      nicknameByOpenId.set(id, String((c && c.nickname) || '').trim())
+    }
+
+    const dishAgg = new Map()
+    let totalQty = 0
+    let revenueCents = 0
+
+    const orders = rawOrders.map((o) => {
+      const customerOpenId = String((o && o.customerOpenId) || '').trim()
+
+      let orderQty = toSafeInt(o && o.totals && o.totals.qty, 0)
+      let orderAmountCents = toSafeInt(o && o.totals && o.totals.amountCents, 0)
+      let computedQty = 0
+      let computedAmountCents = 0
+
+      const items = (Array.isArray(o && o.items) ? o.items : []).map((it) => {
+        const dishId = String((it && it.dishId) || '').trim()
+        const dishName = String((it && it.dishName) || '').trim() || dishId || '未知菜品'
+        const qty = Math.max(0, toSafeInt(it && it.qty, 0))
+        const unitPriceCents = toSafeInt(it && (it.unitPriceCents != null ? it.unitPriceCents : it.priceCents), 0)
+        const lineTotalCents = toSafeInt(it && it.lineTotalCents, unitPriceCents * qty)
+        computedQty += qty
+        computedAmountCents += lineTotalCents
+
+        if (qty > 0) {
+          const prev = dishAgg.get(dishId || dishName) || {
+            dishId: dishId || '',
+            dishName,
+            qty: 0,
+            amountCents: 0,
+          }
+          prev.qty += qty
+          prev.amountCents += lineTotalCents
+          if (!prev.dishName && dishName) prev.dishName = dishName
+          if (!prev.dishId && dishId) prev.dishId = dishId
+          dishAgg.set(dishId || dishName, prev)
+        }
+
+        return {
+          dishId,
+          dishName,
+          qty,
+          unitPriceCents,
+          lineTotalCents,
+        }
+      })
+
+      if (orderQty <= 0 && computedQty > 0) orderQty = computedQty
+      if (orderAmountCents <= 0 && computedAmountCents > 0) orderAmountCents = computedAmountCents
+      totalQty += orderQty
+      revenueCents += orderAmountCents
+
+      return {
+        _id: String((o && o._id) || ''),
+        saleId: String((o && o.saleId) || ''),
+        createdAt: (o && o.createdAt) || null,
+        status: String((o && o.status) || ''),
+        fulfillmentType: String((o && o.fulfillmentType) || 'pickup'),
+        deliveryTimeSlotLabelSnapshot: String((o && o.deliveryTimeSlotLabelSnapshot) || ''),
+        customerOpenId,
+        customerNickname: nicknameByOpenId.get(customerOpenId) || '',
+        contact: {
+          phone: normalizePhone(o && o.contact && o.contact.phone),
+        },
+        address: o && o.address ? o.address : null,
+        addressText: formatOrderAddress(o && o.address),
+        remark: String((o && o.remark) || ''),
+        totals: {
+          qty: orderQty,
+          amountCents: orderAmountCents,
+        },
+        items,
+      }
+    })
+
+    const dishSales = Array.from(dishAgg.values()).sort((a, b) => {
+      if (b.qty !== a.qty) return b.qty - a.qty
+      return String(a.dishName || '').localeCompare(String(b.dishName || ''))
+    })
+
+    return ok({
+      sale: {
+        _id: String((sale && sale._id) || saleId),
+        status: String((sale && sale.status) || ''),
+        createdAt: (sale && sale.createdAt) || null,
+        deliveryTimeSlotLabel: String((sale && sale.deliveryTimeSlotLabel) || ''),
+      },
+      summary: {
+        orderCount: orders.length,
+        totalQty,
+        revenueCents,
+        revenueEuro: (Number(revenueCents || 0) / 100).toFixed(2),
+      },
+      dishSales,
+      orders,
+    })
+  }
+
   if (action === 'listCustomers') {
     let customers = []
     try {
@@ -1401,125 +1535,6 @@ exports.main = async (event) => {
       data: { orderId, action: 'CANCEL', byOpenId: openId, at: now },
     })
     return ok({})
-  }
-
-  if (action === 'export') {
-    const { saleId, exportType } = event
-    const includeCancelled = !!event.includeCancelled
-    if (!saleId) return fail('BAD_REQUEST', 'Missing saleId')
-    if (!exportType) return fail('BAD_REQUEST', 'Missing exportType')
-
-    let sale
-    try {
-      sale = await getSale(saleId)
-    } catch (err) {
-      return fail('NOT_FOUND', 'Sale not found')
-    }
-    if (!sale) return fail('NOT_FOUND', 'Sale not found')
-
-    const where = { saleId }
-    if (!includeCancelled) where.status = ORDER_STATUS.ACTIVE
-    const orderRes = await db.collection('orders').where(where).limit(500).get()
-    const orders = orderRes.data || []
-    orders.sort((a, b) => {
-      const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0
-      const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0
-      return ta - tb
-    })
-
-    const title = `${exportType}-${saleId}`
-    let table
-
-    if (exportType === 'ORDER_DETAIL') {
-      const headers = [
-        '订单号',
-        '下单时间',
-        '类型',
-        '时间段',
-        '电话',
-        '地址行1',
-        '地址行2',
-        '邮编',
-        '城市',
-        '国家',
-        '备注',
-        '付款方式',
-        '收款状态',
-        '订单状态',
-        '菜品明细',
-        '总件数',
-        '总金额(cents)',
-        '总金额(EUR)',
-      ]
-      const rows = orders.map((o) => {
-        const a = o.address || {}
-        const itemText = (o.items || []).map((it) => `${it.dishName} x${it.qty}`).join('; ')
-        const amountCents = (o.totals && o.totals.amountCents) || 0
-        return [
-          o._id,
-          o.createdAt ? String(o.createdAt) : '',
-          o.fulfillmentType,
-          o.deliveryTimeSlotLabelSnapshot || '',
-          (o.contact && o.contact.phone) || '',
-          a.line1 || '',
-          a.line2 || '',
-          a.postalCode || '',
-          a.city || '',
-          a.country || '',
-          o.remark || '',
-          (o.payment && o.payment.method) || '',
-          (o.payment && o.payment.paidStatus) || '',
-          o.status || '',
-          itemText,
-          (o.totals && o.totals.qty) || 0,
-          amountCents,
-          (Number(amountCents) / 100).toFixed(2),
-        ]
-      })
-      table = { headers, rows }
-    } else if (exportType === 'DISH_SUMMARY') {
-      const map = new Map()
-      for (const o of orders) {
-        for (const it of o.items || []) {
-          const key = it.dishName || it.dishId
-          const prev = map.get(key) || 0
-          map.set(key, prev + Number(it.qty || 0))
-        }
-      }
-      const headers = ['菜品', '总份数']
-      const rows = Array.from(map.entries())
-        .sort((a, b) => b[1] - a[1])
-        .map(([name, qty]) => [name, qty])
-      table = { headers, rows }
-    } else if (exportType === 'CUSTOMER_ADDRESS') {
-      const headers = ['订单号', '类型', '时间段', '电话', '地址', '备注', '菜品明细']
-      const rows = orders.map((o) => {
-        const addr = formatOrderAddress(o.address)
-        const itemText = (o.items || []).map((it) => `${it.dishName} x${it.qty}`).join('; ')
-        return [
-          o._id,
-          o.fulfillmentType,
-          o.deliveryTimeSlotLabelSnapshot || '',
-          (o.contact && o.contact.phone) || '',
-          addr,
-          o.remark || '',
-          itemText,
-        ]
-      })
-      table = { headers, rows }
-    } else {
-      return fail('BAD_REQUEST', 'Unknown exportType')
-    }
-
-    const html = asExcelHtml(title, table)
-    const ts = Date.now()
-    const filename = `${exportType}-${ts}.xls`
-    const cloudPath = `exports/${saleId}/${filename}`
-    const up = await cloud.uploadFile({
-      cloudPath,
-      fileContent: Buffer.from(html, 'utf8'),
-    })
-    return ok({ fileID: up.fileID, cloudPath, filename })
   }
 
   return fail('UNKNOWN_ACTION', `Unknown action: ${action || ''}`)

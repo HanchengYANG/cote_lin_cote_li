@@ -4,13 +4,16 @@ page {
   flex-direction: column;
   background: #f6f7fb;
 }
+
 .scrollarea {
   flex: 1;
   overflow-y: hidden;
 }
+
 .page {
   padding: 24rpx;
 }
+
 .card {
   background: #fff;
   border-radius: 20rpx;
@@ -18,41 +21,145 @@ page {
   box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.06);
   margin-bottom: 18rpx;
 }
+
 .title {
   font-size: 32rpx;
   font-weight: 700;
   margin-bottom: 14rpx;
 }
+
 .picker {
   border: 1rpx solid rgba(0, 0, 0, 0.12);
   border-radius: 14rpx;
   padding: 18rpx 16rpx;
-  margin-top: 12rpx;
 }
-.check {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  padding: 14rpx 0 0;
-}
-.btn {
-  background: #111;
-  color: #fff;
-  border-radius: 18rpx;
-  height: 88rpx;
-  line-height: 88rpx;
-}
-.btn[disabled] {
-  opacity: 0.4;
-}
+
 .muted {
   color: rgba(0, 0, 0, 0.55);
 }
+
 .small {
   font-size: 24rpx;
 }
-.center {
-  text-align: center;
-  margin-top: 12rpx;
+
+.revenue-row {
+  display: flex;
+  align-items: baseline;
+  margin-bottom: 12rpx;
 }
 
+.revenue-currency {
+  font-size: 34rpx;
+  font-weight: 700;
+  margin-right: 6rpx;
+}
+
+.revenue-value {
+  font-size: 52rpx;
+  line-height: 1;
+  font-weight: 800;
+  color: #111;
+}
+
+.metrics {
+  border-top: 1rpx solid rgba(0, 0, 0, 0.06);
+  padding-top: 12rpx;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10rpx 0;
+}
+
+.metric-label {
+  color: rgba(0, 0, 0, 0.68);
+  font-size: 26rpx;
+}
+
+.metric-value {
+  color: #111;
+  font-size: 28rpx;
+  font-weight: 700;
+}
+
+.list-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16rpx 0;
+  border-top: 1rpx solid rgba(0, 0, 0, 0.06);
+}
+
+.list-row:first-child {
+  border-top: 0;
+  padding-top: 4rpx;
+}
+
+.list-main {
+  min-width: 0;
+  flex: 1;
+  margin-right: 16rpx;
+}
+
+.row-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #111;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row-amount {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #111;
+  flex-shrink: 0;
+}
+
+.order-list {
+  margin-top: 2rpx;
+}
+
+.order-card {
+  border: 1rpx solid rgba(0, 0, 0, 0.08);
+  border-radius: 16rpx;
+  padding: 16rpx;
+  margin-top: 12rpx;
+  transition: background-color 0.15s ease;
+}
+
+.order-card:first-child {
+  margin-top: 0;
+}
+
+.order-card-hover {
+  background: #f8f9fd;
+}
+
+.order-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12rpx;
+}
+
+.order-name {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #111;
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.order-amount {
+  font-size: 30rpx;
+  font-weight: 800;
+  color: #111;
+  flex-shrink: 0;
+}

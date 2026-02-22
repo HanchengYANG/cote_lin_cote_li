@@ -1,31 +1,81 @@
-<navigation-bar title="导出" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<navigation-bar title="开单复盘" back="{{true}}" color="black" background="#FFF"></navigation-bar>
 <sync-guard ready="{{isReady}}" error="{{syncError}}" bindretry="onSyncRetry"></sync-guard>
 <scroll-view class="scrollarea" scroll-y type="list">
   <view class="page">
     <view class="card" wx:if="{{initialLoading}}">
       <view class="muted">载入中...</view>
     </view>
+
     <block wx:else>
       <view class="card">
         <view class="title">选择开单</view>
         <picker mode="selector" range="{{saleOptions}}" range-key="label" value="{{saleIndex}}" bindchange="onPickSale">
           <view class="picker">开单：{{saleLabel}}</view>
         </picker>
+        <view class="muted small" wx:if="{{loadingReview}}">复盘数据加载中...</view>
+        <view class="muted small" wx:elif="{{review && review.sale}}">
+          时间段：{{review.sale.deliveryTimeSlotLabel || '未设置'}}
+        </view>
       </view>
 
-      <view class="card">
-        <view class="title">导出类型</view>
-        <picker mode="selector" range="{{typeOptions}}" range-key="label" value="{{typeIndex}}" bindchange="onPickType">
-          <view class="picker">类型：{{typeLabel}}</view>
-        </picker>
-        <label class="check">
-          <checkbox checked="{{includeCancelled}}" bindchange="onIncludeCancelled" />
-          <text>包含已取消订单</text>
-        </label>
+      <view class="card" wx:if="{{!hasSaleSelection}}">
+        <view class="muted">暂无可复盘的开单</view>
       </view>
 
-      <button class="btn" loading="{{exporting}}" disabled="{{exporting || !canExport}}" bindtap="doExport">生成并打开文件</button>
-      <view class="muted small center">导出会生成可直接打开的 .xls 文件</view>
+      <view class="card" wx:elif="{{loadingReview && !reviewLoaded}}">
+        <view class="muted">载入复盘数据...</view>
+      </view>
+
+      <block wx:elif="{{review}}">
+        <view class="card">
+          <view class="title">营业额汇总</view>
+          <view class="revenue-row">
+            <text class="revenue-currency">€</text>
+            <text class="revenue-value">{{review.summary.revenueEuro}}</text>
+          </view>
+          <view class="metrics">
+            <view class="metric-row">
+              <text class="metric-label">有效订单数</text>
+              <text class="metric-value">{{review.summary.orderCount}}</text>
+            </view>
+            <view class="metric-row">
+              <text class="metric-label">总件数</text>
+              <text class="metric-value">{{review.summary.totalQty}}</text>
+            </view>
+          </view>
+        </view>
+
+        <view class="card">
+          <view class="title">菜品销量</view>
+          <view class="muted small" wx:if="{{review.dishSales.length===0}}">暂无有效订单菜品销量</view>
+          <view class="list" wx:else>
+            <view class="list-row" wx:for="{{review.dishSales}}" wx:key="dishId">
+              <view class="list-main">
+                <view class="row-title">{{item.dishName}}</view>
+                <view class="muted small">销量 {{item.qty}}</view>
+              </view>
+              <view class="row-amount">€{{item.amountEuro}}</view>
+            </view>
+          </view>
+        </view>
+
+        <view class="card">
+          <view class="title">订单列表</view>
+          <view class="muted small" wx:if="{{review.orders.length===0}}">暂无有效订单</view>
+          <view class="order-list" wx:else>
+            <view class="order-card" hover-class="order-card-hover" wx:for="{{review.orders}}" wx:key="_id" data-id="{{item._id}}" bindtap="goOrderDetail">
+              <view class="order-top">
+                <view class="order-name">{{item.customerNickname}}</view>
+                <view class="order-amount">€{{item.totals.amountEuro}}</view>
+              </view>
+            </view>
+          </view>
+        </view>
+      </block>
+
+      <view class="card" wx:else>
+        <view class="muted">暂无复盘数据</view>
+      </view>
     </block>
   </view>
 </scroll-view>

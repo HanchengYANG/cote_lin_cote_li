@@ -2,71 +2,223 @@ page {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #f6f7fb;
+  background: #eff2f6;
 }
+
 .scrollarea {
   flex: 1;
   overflow-y: hidden;
 }
+
 .page {
-  padding: 24rpx;
+  padding: 20rpx;
+  padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
 }
+
 .card {
-  background: #fff;
-  border-radius: 20rpx;
-  padding: 22rpx;
-  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.06);
-  margin-bottom: 18rpx;
+  background: #ffffff;
+  border-radius: 24rpx;
+  padding: 22rpx 20rpx;
+  margin-bottom: 16rpx;
+  border: 1rpx solid rgba(15, 23, 42, 0.05);
+  box-shadow: 0 10rpx 28rpx rgba(15, 23, 42, 0.06);
 }
+
+.sale-card {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+}
+
 .title {
-  font-size: 32rpx;
+  color: #101828;
+  font-size: 30rpx;
   font-weight: 700;
+  line-height: 1.2;
   margin-bottom: 14rpx;
 }
+
 .muted {
-  color: rgba(0, 0, 0, 0.55);
+  color: #667085;
+  line-height: 1.45;
 }
+
 .small {
-  font-size: 24rpx;
+  font-size: 22rpx;
 }
-.row {
+
+.sale-summary {
   display: flex;
-  justify-content: flex-end;
-  gap: 12rpx;
-  margin-top: 14rpx;
-}
-.grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12rpx;
-}
-.btn {
-  background: #111;
-  color: #fff;
-  border-radius: 18rpx;
-  height: 78rpx;
-  line-height: 78rpx;
-}
-.btn.ghost {
-  background: transparent;
-  color: #111;
-  border: 1rpx solid rgba(0, 0, 0, 0.18);
-}
-.btn.danger {
-  background: #b00020;
-  color: #fff;
-}
-.sale {
-  display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  align-items: center;
-  padding: 14rpx 0;
-  border-top: 1rpx solid rgba(0, 0, 0, 0.06);
+  margin-bottom: 10rpx;
 }
-.sale:first-child {
+
+.summary-item {
+  width: calc(50% - 5rpx);
+  box-sizing: border-box;
+  background: #f8fafc;
+  border: 1rpx solid rgba(15, 23, 42, 0.06);
+  border-radius: 16rpx;
+  padding: 14rpx 14rpx;
+}
+
+.summary-label {
+  color: #667085;
+  font-size: 22rpx;
+  line-height: 1.2;
+}
+
+.summary-value {
+  margin-top: 8rpx;
+  color: #101828;
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.slot-text {
+  margin-bottom: 14rpx;
+}
+
+.section-subtitle {
+  margin-top: 6rpx;
+  margin-bottom: 10rpx;
+  color: #344054;
+  font-size: 24rpx;
+  font-weight: 600;
+}
+
+.sale-stats-empty {
+  padding: 14rpx;
+  background: #f8fafc;
+  border-radius: 14rpx;
+}
+
+.sale-stats-list {
+  border-radius: 16rpx;
+  border: 1rpx solid rgba(15, 23, 42, 0.06);
+  background: #fbfcfe;
+  overflow: hidden;
+}
+
+.sale-stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  padding: 14rpx 16rpx;
+  border-top: 1rpx solid rgba(15, 23, 42, 0.05);
+}
+
+.sale-stat-row:first-child {
   border-top: none;
 }
-.strong {
+
+.sale-stat-name {
+  flex: 1;
+  min-width: 0;
+  color: #101828;
+  font-size: 25rpx;
+  line-height: 1.35;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sale-stat-count {
+  flex: none;
+  color: #475467;
+  font-size: 24rpx;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sale-actions {
+  margin-top: 14rpx;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10rpx;
+}
+
+.quick-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.quick-item {
+  width: calc(50% - 6rpx);
+  min-height: 124rpx;
+  margin-bottom: 12rpx;
+  border-radius: 18rpx;
+  border: 1rpx solid rgba(15, 23, 42, 0.07);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 16rpx;
+  box-sizing: border-box;
+}
+
+.quick-item:nth-last-child(-n + 2) {
+  margin-bottom: 0;
+}
+
+.quick-item-hover {
+  background: #f2f4f7;
+}
+
+.quick-icon {
+  font-size: 34rpx;
+  line-height: 1;
+}
+
+.quick-label {
+  margin-top: 12rpx;
+  color: #111827;
+  font-size: 24rpx;
+  line-height: 1.25;
+  font-weight: 600;
+}
+
+.btn {
+  background: #111827;
+  color: #ffffff;
+  border-radius: 18rpx;
+  height: 82rpx;
+  line-height: 82rpx;
+  font-size: 28rpx;
   font-weight: 700;
 }
 
+.btn::after {
+  border: none;
+}
+
+.btn.ghost {
+  background: #f8fafc;
+  color: #111827;
+  border: 1rpx solid rgba(15, 23, 42, 0.10);
+}
+
+.mini-btn {
+  width: auto;
+  min-width: 148rpx;
+  height: 60rpx;
+  line-height: 60rpx;
+  padding: 0 18rpx;
+  border-radius: 14rpx;
+  font-size: 24rpx;
+  font-weight: 600;
+}
+
+.btn.danger {
+  background: #d92d20;
+  color: #ffffff;
+}
+
+button[disabled] {
+  opacity: 0.45;
+}

@@ -13,54 +13,72 @@
         <view class="muted">无权限</view>
         <view class="muted small">请把你的 openid 加入云数据库 `adminConfig/main.adminOpenIds`</view>
         <view class="muted small">我的 openid：{{myOpenId}}</view>
-        <button class="btn ghost" size="mini" bindtap="copyOpenId">复制 openid</button>
+        <button class="btn ghost mini-btn" size="mini" bindtap="copyOpenId">复制 openid</button>
       </view>
     </block>
 
     <block wx:else>
-      <view class="card">
+      <view class="card sale-card">
         <view class="title">当前开单</view>
         <view wx:if="{{!saleKnown}}">
           <view class="muted">状态同步中...</view>
         </view>
         <view wx:elif="{{activeSale}}">
-          <view class="muted small">状态：{{activeSale.status}}</view>
-          <view class="muted small">配送时间段：{{activeSale.deliveryTimeSlotLabel}}</view>
-          <view class="muted small">订单数：{{stats.orderCount}}</view>
-          <view class="row">
-            <button class="btn ghost" size="mini" bindtap="goActiveSaleEdit">编辑开单</button>
-            <button class="btn ghost" size="mini" bindtap="goOrders">订单</button>
-            <button class="btn danger" size="mini" bindtap="closeSale">截单</button>
+          <view class="sale-summary">
+            <view class="summary-item">
+              <view class="summary-label">状态</view>
+              <view class="summary-value">{{activeSale.status}}</view>
+            </view>
+            <view class="summary-item">
+              <view class="summary-label">订单数</view>
+              <view class="summary-value">{{stats.orderCount}}</view>
+            </view>
+          </view>
+          <view class="muted small slot-text">配送时间段：{{activeSale.deliveryTimeSlotLabel || '未设置'}}</view>
+
+          <view class="section-subtitle">本次销量（按已售排序）</view>
+          <view class="sale-stats-empty muted small" wx:if="{{activeSaleDishStats.length===0}}">暂无菜品数据</view>
+          <view class="sale-stats-list" wx:else>
+            <view class="sale-stat-row" wx:for="{{activeSaleDishStats}}" wx:key="dishId">
+              <view class="sale-stat-name">{{item.dishName}}</view>
+              <view class="sale-stat-count">已售 {{item.soldQty}}</view>
+            </view>
+          </view>
+
+          <view class="sale-actions">
+            <button class="btn ghost mini-btn" size="mini" bindtap="goActiveSaleEdit">编辑开单</button>
+            <button class="btn danger mini-btn" size="mini" bindtap="closeSale">截单</button>
           </view>
         </view>
         <view wx:else>
           <view class="muted">暂无开单中</view>
+          <view class="muted small">先创建或继续编辑开单草稿，再开始接单。</view>
           <button class="btn" bindtap="goSaleDraft">创建/编辑开单</button>
         </view>
       </view>
 
       <view class="card">
         <view class="title">快捷功能</view>
-        <view class="grid">
-          <button class="btn ghost" bindtap="goDishes">菜品库</button>
-          <button class="btn ghost" bindtap="goSaleDraft">开单草稿</button>
-          <button class="btn ghost" bindtap="goOrders">订单管理</button>
-          <button class="btn ghost" bindtap="goCustomers">客人管理</button>
-          <button class="btn ghost" bindtap="goExport">导出</button>
-          <button class="btn ghost" bindtap="goDeliveryRules">起送价规则</button>
-        </view>
-      </view>
-
-      <view class="card">
-        <view class="title">历史开单</view>
-        <view class="muted small" wx:if="{{sales.length===0}}">暂无</view>
-        <view class="sale" wx:for="{{sales}}" wx:key="_id">
-          <view class="sale-left">
-            <view class="strong">{{item.status}}</view>
-            <view class="muted small">{{item.createdAtText}}</view>
+        <view class="quick-grid">
+          <view class="quick-item" hover-class="quick-item-hover" bindtap="goDishes">
+            <text class="quick-icon">🍽️</text>
+            <text class="quick-label">菜品库</text>
           </view>
-          <view class="sale-right">
-            <button class="btn ghost" size="mini" bindtap="goExportWithSale" data-id="{{item._id}}">导出</button>
+          <view class="quick-item" hover-class="quick-item-hover" bindtap="goOrders">
+            <text class="quick-icon">📦</text>
+            <text class="quick-label">订单管理</text>
+          </view>
+          <view class="quick-item" hover-class="quick-item-hover" bindtap="goCustomers">
+            <text class="quick-icon">👥</text>
+            <text class="quick-label">客人管理</text>
+          </view>
+          <view class="quick-item" hover-class="quick-item-hover" bindtap="goSaleReview">
+            <text class="quick-icon">📈</text>
+            <text class="quick-label">开单复盘</text>
+          </view>
+          <view class="quick-item" hover-class="quick-item-hover" bindtap="goDeliveryRules">
+            <text class="quick-icon">🚚</text>
+            <text class="quick-label">起送价规则</text>
           </view>
         </view>
       </view>

@@ -1,5 +1,4 @@
 const { call } = require('../../../utils/api')
-const { formatTime } = require('../../../utils/format')
 const { getSession } = require('../../../utils/session')
 const { getSnapshot, invalidateSnapshot } = require('../../../utils/app-snapshot')
 const { createPage } = require('../../../utils/create-page')
@@ -12,7 +11,7 @@ createPage({
     myOpenId: '',
     activeSale: null,
     stats: { orderCount: 0 },
-    sales: [],
+    activeSaleDishStats: [],
     saleKnown: false,
   },
 
@@ -34,6 +33,7 @@ createPage({
             deliveryTimeSlotLabel: String(sale.deliveryTimeSlotLabel || ''),
           }
         : null,
+      activeSaleDishStats: [],
       saleKnown: true,
     })
   },
@@ -47,29 +47,20 @@ createPage({
       const myOpenId = sess.openId || ''
       this.setData({ authKnown: true, isAdmin, myOpenId })
       if (!isAdmin) {
-        this.setData({ activeSale: null, stats: { orderCount: 0 }, sales: [], saleKnown: true })
+        this.setData({ activeSale: null, stats: { orderCount: 0 }, activeSaleDishStats: [], saleKnown: true })
         return
       }
 
-      const [dashRes, salesRes] = await Promise.all([
-        call('admin', 'getDashboard'),
-        call('admin', 'listSales', { limit: 20 }),
-      ])
+      const dashRes = await call('admin', 'getDashboard')
       if (dashRes.ok) {
         this.setData({
           activeSale: dashRes.data.activeSale || null,
           stats: dashRes.data.stats || { orderCount: 0 },
+          activeSaleDishStats: Array.isArray(dashRes.data.activeSaleDishStats) ? dashRes.data.activeSaleDishStats : [],
           saleKnown: true,
         })
       } else if (!this.data.saleKnown) {
         this.setData({ saleKnown: true })
-      }
-      if (salesRes.ok) {
-        const sales = (salesRes.data.sales || []).map((s) => ({
-          ...s,
-          createdAtText: formatTime(s.createdAt),
-        }))
-        this.setData({ sales })
       }
     } finally {
       if (!silent) this.setData({ refresherTriggered: false })
@@ -106,17 +97,12 @@ createPage({
     wx.navigateTo({ url: '/pages/admin/sale-active-edit/index' })
   },
 
-  goExport() {
+  goSaleReview() {
     wx.navigateTo({ url: '/pages/admin/export/index' })
   },
 
   goDeliveryRules() {
     wx.navigateTo({ url: '/pages/admin/delivery-rules/index' })
-  },
-
-  goExportWithSale(e) {
-    const saleId = e.currentTarget.dataset.id
-    wx.navigateTo({ url: `/pages/admin/export/index?saleId=${encodeURIComponent(saleId)}` })
   },
 
   async closeSale() {
