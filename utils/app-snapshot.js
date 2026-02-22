@@ -25,15 +25,15 @@ function getStore() {
 function normalizeSale(raw) {
   if (!raw || typeof raw !== 'object') {
     return {
-      isOpen: false,
       saleId: '',
+      status: '',
       deliveryTimeSlotLabel: '',
       _id: '',
     }
   }
   return {
-    isOpen: !!raw.isOpen,
     saleId: String(raw.saleId || raw._id || '').trim(),
+    status: String(raw.status || '').trim(),
     deliveryTimeSlotLabel: String(raw.deliveryTimeSlotLabel || '').trim(),
     _id: String(raw._id || raw.saleId || '').trim(),
   }

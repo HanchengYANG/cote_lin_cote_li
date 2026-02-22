@@ -81,6 +81,17 @@
       </view>
     </view>
 
+    <view class="card" wx:if="{{order}}">
+      <view class="title">付款方式</view>
+      <picker mode="selector" range="{{paymentMethodOptions}}" range-key="label" value="{{paymentMethodIndex}}" bindchange="onPickPaymentMethod">
+        <view class="picker">付款方式：{{paymentMethodLabel}}</view>
+      </picker>
+      <view class="muted small">收款状态：{{paymentPaidStatusText}}</view>
+      <button class="btn ghost pay-btn" loading="{{savingPaymentMethod}}" disabled="{{savingPaymentMethod || saving || cancelling}}" bindtap="onSavePaymentMethod">
+        保存付款方式
+      </button>
+    </view>
+
     <order-editor
       order="{{order}}"
       editable-items="{{editableItems}}"
@@ -89,6 +100,7 @@
       can-cancel-order="{{canCancelOrder}}"
       saving="{{saving}}"
       cancelling="{{cancelling}}"
+      show-payment="{{false}}"
       show-payment-status="{{true}}"
       show-fulfillment="{{false}}"
       show-contact="{{false}}"

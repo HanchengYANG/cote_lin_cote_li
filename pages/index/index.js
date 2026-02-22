@@ -19,8 +19,12 @@ function normalizeDishes(input) {
   return Array.isArray(input) ? input.filter((x) => x && x._id) : []
 }
 
+function saleIsOpen(saleInfo) {
+  return !!(saleInfo && String(saleInfo.status || '').trim() === 'OPEN')
+}
+
 function sortDishesBySaleState(dishes, saleInfo) {
-  if (!saleInfo || !saleInfo.isOpen) return dishes
+  if (!saleIsOpen(saleInfo)) return dishes
   const sorted = [...dishes]
   sorted.sort((a, b) => {
     const rankA = Number(a.statusRank || 0)
@@ -39,8 +43,8 @@ createPage({
     isAdmin: false,
     isHydrating: true,
     saleInfo: {
-      isOpen: false,
       saleId: '',
+      status: '',
       deliveryTimeSlotLabel: '',
     },
     profileSummary: {
@@ -104,14 +108,14 @@ createPage({
   applyBootstrap(rawSale, rawDishes, rawProfile, rawSession) {
     const prevQtyMap = { ...(this.data.qtyMap || {}) }
     const saleInfo = {
-      isOpen: !!(rawSale && rawSale.isOpen),
       saleId: String((rawSale && rawSale.saleId) || ''),
+      status: String((rawSale && rawSale.status) || ''),
       deliveryTimeSlotLabel: String((rawSale && rawSale.deliveryTimeSlotLabel) || ''),
     }
     const dishes = normalizeDishes(rawDishes).map((d) => {
       const inSale = !!d.inSale
       const isSoldOut = !!d.isSoldOut
-      const isOpen = !!saleInfo.isOpen
+      const isOpen = saleIsOpen(saleInfo)
       const canAdd = !isOpen || (inSale && !isSoldOut)
       const statusText = isOpen ? (inSale ? (isSoldOut ? '售罄' : '可下单') : '本次不卖') : '未开单'
       const statusClass = isOpen ? (inSale ? (isSoldOut ? 'sold-out' : 'ok') : 'closed') : 'not-open'
@@ -219,7 +223,7 @@ createPage({
   },
 
   bumpQty(id, delta) {
-    const saleOpen = !!(this.data.saleInfo && this.data.saleInfo.isOpen)
+    const saleOpen = saleIsOpen(this.data.saleInfo)
     let hitStockLimit = false
     const dishes = this.data.dishes.map((d) => {
       if (d._id !== id) return d

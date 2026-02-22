@@ -45,6 +45,10 @@ page {
   font-size: 22rpx;
 }
 
+.warn {
+  color: #b42318;
+}
+
 .sale-summary {
   display: flex;
   flex-wrap: wrap;
@@ -85,6 +89,31 @@ page {
   color: #344054;
   font-size: 24rpx;
   font-weight: 600;
+}
+
+.section-subtitle.no-margin {
+  margin: 0;
+}
+
+.section-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  margin-top: 6rpx;
+  margin-bottom: 10rpx;
+}
+
+.section-row.compact {
+  margin-top: 10rpx;
+  margin-bottom: 10rpx;
+}
+
+.fold-btn {
+  flex: none;
+  color: #475467;
+  font-size: 24rpx;
+  line-height: 1.2;
 }
 
 .sale-stats-empty {
@@ -141,10 +170,74 @@ page {
   gap: 10rpx;
 }
 
+.sale-actions.primary-first {
+  justify-content: flex-start;
+}
+
+.progress-panel {
+  border-radius: 16rpx;
+  border: 1rpx solid rgba(15, 23, 42, 0.06);
+  background: #fbfcfe;
+  padding: 14rpx;
+}
+
+.progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.progress-percent {
+  color: #101828;
+  font-size: 36rpx;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.progress-track {
+  margin-top: 10rpx;
+  height: 14rpx;
+  border-radius: 999rpx;
+  background: #eaecf0;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #22c55e 0%, #16a34a 100%);
+}
+
+.ops-group-grid {
+  margin-top: 12rpx;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10rpx 0;
+}
+
+.ops-group {
+  width: calc(50% - 5rpx);
+  box-sizing: border-box;
+  border-radius: 14rpx;
+  border: 1rpx solid rgba(15, 23, 42, 0.06);
+  background: #fff;
+  padding: 12rpx;
+}
+
+.ops-group-title {
+  color: #101828;
+  font-size: 24rpx;
+  font-weight: 700;
+  margin-bottom: 4rpx;
+}
+
 .quick-grid {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
+  margin-bottom: -12rpx;
 }
 
 .quick-item {
@@ -162,12 +255,26 @@ page {
   box-sizing: border-box;
 }
 
-.quick-item:nth-last-child(-n + 2) {
-  margin-bottom: 0;
-}
-
 .quick-item-hover {
   background: #f2f4f7;
+}
+
+.quick-item.disabled {
+  opacity: 0.45;
+}
+
+.quick-item.primary {
+  background: linear-gradient(180deg, #111827 0%, #1f2937 100%);
+  border-color: rgba(17, 24, 39, 0.18);
+}
+
+.quick-item.primary .quick-label {
+  color: #ffffff;
+}
+
+.quick-item.danger {
+  background: linear-gradient(180deg, #fff5f5 0%, #fef2f2 100%);
+  border-color: rgba(217, 45, 32, 0.12);
 }
 
 .quick-icon {

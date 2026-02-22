@@ -19,6 +19,10 @@
     "pages/admin/customers/index",
     "pages/admin/customer-detail/index",
     "pages/admin/order-detail/index",
+    "pages/admin/production/index",
+    "pages/admin/fulfillment-prep/index",
+    "pages/admin/fulfillment-run/index",
+    "pages/admin/pickup-run/index",
     "pages/admin/export/index"
   ],
   "window": {

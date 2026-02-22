@@ -62,7 +62,7 @@
     <view class="muted small">{{lockHint}}</view>
   </view>
 
-  <view class="card">
+  <view class="card" wx:if="{{showPayment}}">
     <view class="title">付款</view>
     <view class="muted small">方式：{{order.payment && order.payment.method ? order.payment.method : '-'}}</view>
     <view class="muted small" wx:if="{{showPaymentStatus}}">状态：{{order.payment && order.payment.paidStatus ? order.payment.paidStatus : '-'}}</view>

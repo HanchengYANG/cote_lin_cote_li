@@ -12,6 +12,26 @@ const {
   buildPayloadItems,
 } = require('../../../utils/order-editor')
 
+const PAYMENT_METHOD_OPTIONS = [
+  { label: '现金', value: 'cash' },
+  { label: '转账', value: 'wechat_transfer' },
+]
+
+function normalizePaymentMethodValue(input) {
+  const v = String(input || '').trim()
+  if (v === 'cash') return 'cash'
+  if (v === 'wechat_transfer' || v === 'transfer' || v === 'bank') return 'wechat_transfer'
+  return 'cash'
+}
+
+function paymentMethodLabel(input) {
+  return normalizePaymentMethodValue(input) === 'wechat_transfer' ? '转账' : '现金'
+}
+
+function paidStatusText(input) {
+  return String(input || '').trim() === 'PAID' ? '已收款' : '未收款'
+}
+
 function normalizeManualAddress(input) {
   const normalized = normalizeFrAddress(input) || {}
   return {
@@ -59,6 +79,11 @@ createPage({
     rejecting: false,
     saving: false,
     cancelling: false,
+    paymentMethodOptions: PAYMENT_METHOD_OPTIONS,
+    paymentMethodIndex: 0,
+    paymentMethodLabel: PAYMENT_METHOD_OPTIONS[0].label,
+    paymentPaidStatusText: '未收款',
+    savingPaymentMethod: false,
   },
 
   onLoad(query) {
@@ -92,6 +117,8 @@ createPage({
     )
     let phoneDraft = normalizePhone(rawOrder && rawOrder.contact && rawOrder.contact.phone)
     if (!phoneDraft && matchedSavedAddress && matchedSavedAddress.phone) phoneDraft = normalizePhone(matchedSavedAddress.phone)
+    const normalizedMethod = normalizePaymentMethodValue(rawOrder && rawOrder.payment && rawOrder.payment.method)
+    const paymentMethodIndex = PAYMENT_METHOD_OPTIONS.findIndex((it) => it.value === normalizedMethod)
     this.setData({
       order,
       canEditItems,
@@ -110,7 +137,44 @@ createPage({
       slotDate: parsed ? parsed.slotDate : '',
       slotStart: parsed ? parsed.slotStart : '',
       slotEnd: parsed ? parsed.slotEnd : '',
+      paymentMethodIndex: paymentMethodIndex >= 0 ? paymentMethodIndex : 0,
+      paymentMethodLabel: paymentMethodLabel(normalizedMethod),
+      paymentPaidStatusText: paidStatusText(rawOrder && rawOrder.payment && rawOrder.payment.paidStatus),
     })
+  },
+
+  onPickPaymentMethod(e) {
+    const idx = Number((e && e.detail && e.detail.value) || 0)
+    const safeIdx = Number.isFinite(idx) && idx >= 0 && idx < PAYMENT_METHOD_OPTIONS.length ? idx : 0
+    const picked = PAYMENT_METHOD_OPTIONS[safeIdx]
+    this.setData({
+      paymentMethodIndex: safeIdx,
+      paymentMethodLabel: picked.label,
+    })
+  },
+
+  async onSavePaymentMethod() {
+    if (this.data.savingPaymentMethod || !this.data.orderId || !this.data.order) return
+    const option = PAYMENT_METHOD_OPTIONS[this.data.paymentMethodIndex] || PAYMENT_METHOD_OPTIONS[0]
+    const nextMethod = option.value
+    const currentMethod = normalizePaymentMethodValue(this.data.order && this.data.order.payment && this.data.order.payment.method)
+    if (nextMethod === currentMethod) {
+      wx.showToast({ title: '付款方式未变化', icon: 'none' })
+      return
+    }
+    this.setData({ savingPaymentMethod: true })
+    const res = await call('admin', 'updateOrderPaymentMethod', {
+      orderId: this.data.orderId,
+      paymentMethod: nextMethod,
+    })
+    this.setData({ savingPaymentMethod: false })
+    if (!res.ok) {
+      wx.showToast({ title: res.message || '保存付款方式失败', icon: 'none' })
+      await this.reload()
+      return
+    }
+    wx.showToast({ title: '付款方式已保存', icon: 'success' })
+    await this.reload()
   },
 
   onQtyChange(e) {

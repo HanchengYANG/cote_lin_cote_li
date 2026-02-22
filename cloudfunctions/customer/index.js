@@ -47,6 +47,7 @@ async function getOrCreateAdminConfig() {
       data: {
         adminOpenIds: [],
         activeSaleId: null,
+        currentSaleId: null,
         updatedAt: db.serverDate(),
       },
     })
@@ -55,18 +56,22 @@ async function getOrCreateAdminConfig() {
   }
 }
 
-async function getActiveSale() {
+async function getCurrentSaleDoc() {
   const cfg = await getOrCreateAdminConfig()
-  const activeSaleId = cfg.activeSaleId
-  if (!activeSaleId) return null
+  const currentSaleId = String((cfg && (cfg.currentSaleId || cfg.activeSaleId)) || '').trim()
+  if (!currentSaleId) return null
   try {
-    const r = await db.collection('sales').doc(activeSaleId).get()
-    const sale = r.data
-    if (!sale || sale.status !== 'OPEN') return null
-    return sale
+    const r = await db.collection('sales').doc(currentSaleId).get()
+    return r && r.data ? r.data : null
   } catch (err) {
     return null
   }
+}
+
+async function getOrderableSale() {
+  const sale = await getCurrentSaleDoc()
+  if (!sale) return null
+  return String((sale && sale.status) || '').trim() === 'OPEN' ? sale : null
 }
 
 function normalizeSaleDishConfigs(sale) {
@@ -540,7 +545,7 @@ exports.main = async (event) => {
   }
 
   if (action === 'bootstrapHome') {
-    const sale = await getActiveSale()
+    const sale = await getCurrentSaleDoc()
     const profileDoc = await ensureCustomerDoc(openId)
     const r = await db
       .collection('dishes')
@@ -556,22 +561,18 @@ exports.main = async (event) => {
     const firstIds = dishes.map((d) => d.images[0] || '').filter(Boolean)
     const urlMap = await getTempUrlMap(firstIds)
 
+    const saleStatus = String((sale && sale.status) || '').trim()
     let saleInfo = {
-      isOpen: false,
-      saleId: '',
-      deliveryTimeSlotLabel: '',
+      saleId: String((sale && sale._id) || ''),
+      status: saleStatus || '',
+      deliveryTimeSlotLabel: String((sale && sale.deliveryTimeSlotLabel) || ''),
     }
     let cfgMap = new Map()
-    if (sale) {
+    if (sale && saleStatus === 'OPEN') {
       const normalizedConfigs = normalizeSaleDishConfigs(sale)
       const configCheck = validateSaleDishConfigs(sale, normalizedConfigs)
       if (!configCheck.ok) return fail('SALE_CONFIG_INVALID', configCheck.message)
       cfgMap = new Map(normalizedConfigs.map((x) => [x.dishId, { ...x }]))
-      saleInfo = {
-        isOpen: true,
-        saleId: String(sale._id || ''),
-        deliveryTimeSlotLabel: String(sale.deliveryTimeSlotLabel || ''),
-      }
     }
 
     const out = dishes.map((d) => {
@@ -597,7 +598,7 @@ exports.main = async (event) => {
   }
 
   if (action === 'getCurrentSale') {
-    const sale = await getActiveSale()
+    const sale = await getOrderableSale()
     if (!sale) return ok({ sale: null, dishes: [] })
     const normalizedConfigs = normalizeSaleDishConfigs(sale)
     const configCheck = validateSaleDishConfigs(sale, normalizedConfigs)
@@ -934,7 +935,7 @@ exports.main = async (event) => {
   }
 
   if (action === 'createOrder') {
-    const sale = await getActiveSale()
+    const sale = await getOrderableSale()
     if (!sale) return fail('NOT_OPEN', 'Not open for ordering')
     const saleId = event.saleId
     if (!saleId || saleId !== sale._id) return fail('NOT_OPEN', 'Not open for ordering')
@@ -1255,6 +1256,9 @@ exports.main = async (event) => {
               : null,
           minOrderCentsSnapshot: fulfillmentType === 'delivery' ? minOrderCentsForCity || null : null,
           payment: { method: paymentMethod, paidStatus },
+          handoffStatus: 'PENDING',
+          handedOffAt: null,
+          handedOffByOpenId: null,
           remark: String(event.remark || '').trim(),
           items: orderItems,
           totals: { qty: totalQty, amountCents: totalAmountCents },

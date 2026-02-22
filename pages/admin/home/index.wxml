@@ -27,38 +27,195 @@
           <view class="sale-summary">
             <view class="summary-item">
               <view class="summary-label">状态</view>
-              <view class="summary-value">{{activeSale.status}}</view>
+              <view class="summary-value">{{activeSale.statusText || activeSale.status}}</view>
             </view>
             <view class="summary-item">
               <view class="summary-label">订单数</view>
               <view class="summary-value">{{stats.orderCount}}</view>
             </view>
+            <view class="summary-item">
+              <view class="summary-label">销售额</view>
+              <view class="summary-value">€{{activeSaleRevenueEuro}}</view>
+            </view>
           </view>
           <view class="muted small slot-text">配送时间段：{{activeSale.deliveryTimeSlotLabel || '未设置'}}</view>
 
-          <view class="section-subtitle">本次销量（按已售排序）</view>
-          <view class="sale-stats-empty muted small" wx:if="{{activeSaleDishStats.length===0}}">暂无菜品数据</view>
-          <view class="sale-stats-list" wx:else>
-            <view class="sale-stat-row" wx:for="{{activeSaleDishStats}}" wx:key="dishId">
-              <view class="sale-stat-name">{{item.dishName}}</view>
-              <view class="sale-stat-count">已售 {{item.soldQty}}</view>
+          <block wx:if="{{activeSale.status==='OPEN'}}">
+            <view class="section-row">
+              <view class="section-subtitle no-margin">本次销量（按已售排序）</view>
+              <view class="fold-btn" wx:if="{{activeSaleDishStats.length>0}}" bindtap="toggleOpenSalesListCollapsed">
+                {{openSalesListCollapsed ? '展开' : '收起'}}
+              </view>
             </view>
-          </view>
+            <view class="sale-stats-empty muted small" wx:if="{{activeSaleDishStats.length===0}}">暂无菜品数据</view>
+            <view class="sale-stats-list" wx:elif="{{!openSalesListCollapsed}}">
+              <view class="sale-stat-row" wx:for="{{activeSaleDishStats}}" wx:key="dishId">
+                <view class="sale-stat-name">{{item.dishName}}</view>
+                <view class="sale-stat-count">已售 {{item.soldQty}}</view>
+              </view>
+            </view>
+          </block>
 
-          <view class="sale-actions">
-            <button class="btn ghost mini-btn" size="mini" bindtap="goActiveSaleEdit">编辑开单</button>
-            <button class="btn danger mini-btn" size="mini" bindtap="closeSale">截单</button>
-          </view>
+          <block wx:elif="{{activeSale.status==='CLOSED'}}">
+            <view class="section-subtitle">生产进度</view>
+            <view class="progress-panel" wx:if="{{activeSaleOpsSummary && activeSaleOpsSummary.closed && activeSaleOpsSummary.closed.production}}">
+              <view class="progress-head">
+                <view class="progress-percent">{{activeSaleOpsSummary.closed.production.completionPercent}}%</view>
+                <view class="muted small">
+                  已生产 {{activeSaleOpsSummary.closed.production.totalPreparedQty}} / {{activeSaleOpsSummary.closed.production.totalNeedQty}}
+                </view>
+              </view>
+              <view class="progress-track">
+                <view class="progress-bar" style="width: {{activeSaleOpsSummary.closed.production.completionPercent}}%;"></view>
+              </view>
+              <view class="sale-stats-empty muted small" wx:if="{{activeSaleOpsSummary.closed.production.items.length===0}}">暂无菜品生产数据</view>
+              <block wx:else>
+                <view class="section-row compact">
+                  <view class="muted small">菜品进度明细</view>
+                  <view class="fold-btn" bindtap="toggleClosedProductionItemsCollapsed">
+                    {{closedProductionItemsCollapsed ? '展开' : '收起'}}
+                  </view>
+                </view>
+                <view class="sale-stats-list" wx:if="{{!closedProductionItemsCollapsed}}">
+                  <view class="sale-stat-row" wx:for="{{activeSaleOpsSummary.closed.production.items}}" wx:key="dishId">
+                    <view class="sale-stat-name">{{item.dishName}}</view>
+                    <view class="sale-stat-count">{{item.preparedQty}} / {{item.needQty}}</view>
+                  </view>
+                </view>
+              </block>
+            </view>
+          </block>
+
+          <block wx:elif="{{activeSale.status==='FULFILLING'}}">
+            <view class="section-subtitle">运营概览</view>
+            <view class="progress-panel" wx:if="{{activeSaleOpsSummary && activeSaleOpsSummary.fulfilling}}">
+              <view class="progress-head">
+                <view class="progress-percent">{{activeSaleOpsSummary.fulfilling.completionPercent}}%</view>
+                <view class="muted small">
+                  已完成 {{activeSaleOpsSummary.fulfilling.doneOrders}} / {{activeSaleOpsSummary.fulfilling.totalActiveOrders}} 单
+                </view>
+              </view>
+              <view class="progress-track">
+                <view class="progress-bar" style="width: {{activeSaleOpsSummary.fulfilling.completionPercent}}%;"></view>
+              </view>
+              <view class="ops-group-grid">
+                <view class="ops-group">
+                  <view class="ops-group-title">配送</view>
+                  <view class="muted small">总单 {{activeSaleOpsSummary.fulfilling.delivery.total}}</view>
+                  <view class="muted small">已交付 {{activeSaleOpsSummary.fulfilling.delivery.delivered}} / 已收款 {{activeSaleOpsSummary.fulfilling.delivery.paid}}</view>
+                  <view class="muted small">未完成 {{activeSaleOpsSummary.fulfilling.delivery.remaining}}</view>
+                </view>
+                <view class="ops-group">
+                  <view class="ops-group-title">自取</view>
+                  <view class="muted small">总单 {{activeSaleOpsSummary.fulfilling.pickup.total}}</view>
+                  <view class="muted small">已交付 {{activeSaleOpsSummary.fulfilling.pickup.delivered}} / 已收款 {{activeSaleOpsSummary.fulfilling.pickup.paid}}</view>
+                  <view class="muted small">未完成 {{activeSaleOpsSummary.fulfilling.pickup.remaining}}</view>
+                </view>
+              </view>
+            </view>
+            <block wx:if="{{activeSaleOpsSummary && activeSaleOpsSummary.fulfilling && activeSaleOpsSummary.fulfilling.production && activeSaleOpsSummary.fulfilling.production.totalNeedQty>0 && activeSaleOpsSummary.fulfilling.production.completionPercent<100}}">
+              <view class="section-subtitle">生产进度（仍在进行）</view>
+              <view class="progress-panel">
+                <view class="progress-head">
+                  <view class="progress-percent">{{activeSaleOpsSummary.fulfilling.production.completionPercent}}%</view>
+                  <view class="muted small">
+                    已生产 {{activeSaleOpsSummary.fulfilling.production.totalPreparedQty}} / {{activeSaleOpsSummary.fulfilling.production.totalNeedQty}}
+                  </view>
+                </view>
+                <view class="progress-track">
+                  <view class="progress-bar" style="width: {{activeSaleOpsSummary.fulfilling.production.completionPercent}}%;"></view>
+                </view>
+                <view class="section-row compact" wx:if="{{activeSaleOpsSummary.fulfilling.production.items.length}}">
+                  <view class="muted small">菜品进度明细</view>
+                  <view class="fold-btn" bindtap="toggleFulfillingProductionItemsCollapsed">
+                    {{fulfillingProductionItemsCollapsed ? '展开' : '收起'}}
+                  </view>
+                </view>
+                <view class="sale-stats-list" wx:if="{{activeSaleOpsSummary.fulfilling.production.items.length && !fulfillingProductionItemsCollapsed}}">
+                  <view class="sale-stat-row" wx:for="{{activeSaleOpsSummary.fulfilling.production.items}}" wx:key="dishId">
+                    <view class="sale-stat-name">{{item.dishName}}</view>
+                    <view class="sale-stat-count">{{item.preparedQty}} / {{item.needQty}}</view>
+                  </view>
+                </view>
+              </view>
+            </block>
+            <view class="muted small warn" wx:if="{{activeSaleIncompleteReason && (!canCompleteActiveSale)}}">未完成：未交付{{activeSaleIncompleteReason.undeliveredCount || 0}} / 未收款{{activeSaleIncompleteReason.unpaidCount || 0}}</view>
+          </block>
+
+          <block wx:else>
+            <view class="muted">当前状态暂未定义首页看板，请使用快捷功能继续操作。</view>
+          </block>
         </view>
         <view wx:else>
           <view class="muted">暂无开单中</view>
           <view class="muted small">先创建或继续编辑开单草稿，再开始接单。</view>
-          <button class="btn" bindtap="goSaleDraft">创建/编辑开单</button>
         </view>
       </view>
 
       <view class="card">
-        <view class="title">快捷功能</view>
+        <view class="title">当前操作</view>
+        <view class="quick-grid">
+          <block wx:if="{{!saleKnown}}">
+            <view class="quick-item disabled">
+              <text class="quick-icon">⏳</text>
+              <text class="quick-label">状态同步中</text>
+            </view>
+          </block>
+          <block wx:elif="{{!activeSale}}">
+            <view class="quick-item" hover-class="quick-item-hover" bindtap="goSaleDraft">
+              <text class="quick-icon">📝</text>
+              <text class="quick-label">创建/编辑开单</text>
+            </view>
+          </block>
+          <block wx:elif="{{activeSale.status==='OPEN'}}">
+            <view class="quick-item" hover-class="quick-item-hover" bindtap="goActiveSaleEdit">
+              <text class="quick-icon">✏️</text>
+              <text class="quick-label">编辑开单</text>
+            </view>
+            <view class="quick-item danger" hover-class="quick-item-hover" bindtap="closeSale">
+              <text class="quick-icon">⛔</text>
+              <text class="quick-label">截单</text>
+            </view>
+          </block>
+          <block wx:elif="{{activeSale.status==='CLOSED'}}">
+            <view class="quick-item" hover-class="quick-item-hover" bindtap="goProduction">
+              <text class="quick-icon">🍳</text>
+              <text class="quick-label">生产管理</text>
+            </view>
+            <view class="quick-item" hover-class="quick-item-hover" bindtap="goFulfillmentPrep">
+              <text class="quick-icon">🗂️</text>
+              <text class="quick-label">交付准备</text>
+            </view>
+          </block>
+          <block wx:elif="{{activeSale.status==='FULFILLING'}}">
+            <view class="quick-item primary {{(completingActiveSale || !canCompleteActiveSale) ? 'disabled' : ''}}" hover-class="quick-item-hover" bindtap="completeActiveSale">
+              <text class="quick-icon">✅</text>
+              <text class="quick-label">完成本次开单</text>
+            </view>
+            <view class="quick-item" hover-class="quick-item-hover" bindtap="goFulfillmentRun">
+              <text class="quick-icon">🛵</text>
+              <text class="quick-label">配送执行</text>
+            </view>
+            <view class="quick-item" hover-class="quick-item-hover" bindtap="goPickupRun">
+              <text class="quick-icon">🧾</text>
+              <text class="quick-label">自取执行</text>
+            </view>
+            <view class="quick-item" hover-class="quick-item-hover" bindtap="goFulfillmentPrep">
+              <text class="quick-icon">🗂️</text>
+              <text class="quick-label">交付准备</text>
+            </view>
+          </block>
+          <block wx:else>
+            <view class="quick-item" hover-class="quick-item-hover" bindtap="goSaleDraft">
+              <text class="quick-icon">📝</text>
+              <text class="quick-label">创建/编辑开单</text>
+            </view>
+          </block>
+        </view>
+      </view>
+
+      <view class="card">
+        <view class="title">店铺管理</view>
         <view class="quick-grid">
           <view class="quick-item" hover-class="quick-item-hover" bindtap="goDishes">
             <text class="quick-icon">🍽️</text>
@@ -79,6 +236,10 @@
           <view class="quick-item" hover-class="quick-item-hover" bindtap="goDeliveryRules">
             <text class="quick-icon">🚚</text>
             <text class="quick-label">起送价规则</text>
+          </view>
+          <view class="quick-item" hover-class="quick-item-hover" bindtap="debugForceSetSaleStatus">
+            <text class="quick-icon">🛠️</text>
+            <text class="quick-label">改开单状态</text>
           </view>
         </view>
       </view>

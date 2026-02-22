@@ -175,11 +175,12 @@ createPage({
     for (const d of dishes) {
       if (d && d._id) dishesById[d._id] = d
     }
-    const isOpen = !!snapSale.isOpen
+    const saleStatusRaw = String((snapSale && snapSale.status) || '').trim()
+    const isOpen = saleStatusRaw === 'OPEN'
     const sale = isOpen
       ? {
           _id: String(snapSale.saleId || snapSale._id || ''),
-          status: 'OPEN',
+          status: saleStatusRaw || 'OPEN',
           deliveryTimeSlotLabel: String(snapSale.deliveryTimeSlotLabel || ''),
         }
       : null

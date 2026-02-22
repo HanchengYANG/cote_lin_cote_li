@@ -32,6 +32,10 @@ Component({
       type: Boolean,
       value: false,
     },
+    showPayment: {
+      type: Boolean,
+      value: true,
+    },
     showFulfillment: {
       type: Boolean,
       value: true,
