@@ -385,7 +385,7 @@ function createSaleService(deps) {
               await tx.collection('orders').doc(targetOrderId).set({ data: nextData })
               await tx.collection('orders').doc(order._id).remove()
             }
-            await tx.collection('orderAuditLogs').add({
+            await tx.collection('order_audit_logs').add({
               data: {
                 orderId: targetOrderId,
                 action: 'DEFERRED_APPROVE_ON_OPEN',
@@ -407,7 +407,23 @@ function createSaleService(deps) {
 
     async closeSale(event) {
       const { saleId } = event
+      const ignorePendingReviewWarning = !!(event && event.ignorePendingReviewWarning)
       if (!saleId) return fail('BAD_REQUEST', 'Missing saleId')
+      if (!ignorePendingReviewWarning) {
+        try {
+          const pendingOrders = await getAllByPaging(
+            (skip, limit) =>
+              db.collection('orders').where({ status: ORDER_STATUS.PENDING_REVIEW }).skip(skip).limit(limit),
+            { pageSize: 100 }
+          )
+          const pendingReviewCount = Array.isArray(pendingOrders) ? pendingOrders.length : 0
+          if (pendingReviewCount > 0) {
+            return fail('PENDING_REVIEW_EXISTS', '当前存在待确认订单', { pendingReviewCount })
+          }
+        } catch (err) {
+          // Ignore pending-count check failure and let close flow proceed.
+        }
+      }
       try {
         await db.runTransaction(async (tx) => {
           const runtimeCtx = await getOrCreateRuntimeStateTx(tx)

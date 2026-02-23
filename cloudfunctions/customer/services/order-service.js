@@ -150,7 +150,7 @@ function createCustomerOrderService(deps) {
               updatedAt: now,
             },
           })
-          await tx.collection('orderAuditLogs').add({
+          await tx.collection('order_audit_logs').add({
             data: {
               orderId,
               action: order.status === ORDER_STATUS.ACTIVE ? 'CUSTOMER_UPDATE_ITEMS' : 'CUSTOMER_UPDATE_PENDING_ITEMS',
@@ -225,7 +225,7 @@ function createCustomerOrderService(deps) {
               updatedAt: now,
             },
           })
-          await tx.collection('orderAuditLogs').add({
+          await tx.collection('order_audit_logs').add({
             data: {
               orderId,
               action: 'CUSTOMER_CANCEL',
@@ -634,7 +634,7 @@ function createCustomerOrderService(deps) {
             })
           }
 
-          await tx.collection('orderAuditLogs').add({
+          await tx.collection('order_audit_logs').add({
             data: {
               orderId: currentOrderId,
               action: auditAction,

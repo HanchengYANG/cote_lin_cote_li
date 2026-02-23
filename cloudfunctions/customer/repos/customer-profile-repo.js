@@ -155,7 +155,6 @@ function createCustomerProfileRepo(deps) {
       } else {
         await tx.collection('customer_addresses').doc(addrId).set({
           data: {
-            _id: addrId,
             ...payload,
             createdAt: now,
           },

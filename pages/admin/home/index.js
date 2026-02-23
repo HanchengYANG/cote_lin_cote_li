@@ -29,6 +29,7 @@ createPage({
     myOpenId: '',
     activeSale: null,
     stats: { orderCount: 0 },
+    pendingReviewCount: 0,
     activeSaleRevenueCents: 0,
     activeSaleRevenueEuro: '0.00',
     activeSaleDishStats: [],
@@ -63,6 +64,7 @@ createPage({
           }
         : null,
       activeSaleDishStats: [],
+      pendingReviewCount: 0,
       activeSaleRevenueCents: 0,
       activeSaleRevenueEuro: '0.00',
       activeSaleOpsSummary: null,
@@ -84,6 +86,7 @@ createPage({
         this.setData({
           activeSale: null,
           stats: { orderCount: 0 },
+          pendingReviewCount: 0,
           activeSaleDishStats: [],
           activeSaleRevenueCents: 0,
           activeSaleRevenueEuro: '0.00',
@@ -106,6 +109,7 @@ createPage({
               }
             : null,
           stats: dashRes.data.stats || { orderCount: 0 },
+          pendingReviewCount: Number(dashRes.data.pendingReviewCount || 0),
           activeSaleRevenueCents: Number(dashRes.data.activeSaleRevenueCents || 0),
           activeSaleRevenueEuro: String(dashRes.data.activeSaleRevenueEuro || '0.00'),
           activeSaleDishStats: Array.isArray(dashRes.data.activeSaleDishStats) ? dashRes.data.activeSaleDishStats : [],
@@ -154,6 +158,10 @@ createPage({
 
   goOrders() {
     wx.navigateTo({ url: '/pages/admin/orders/index' })
+  },
+
+  goPendingOrders() {
+    wx.navigateTo({ url: '/pages/admin/pending-orders/index' })
   },
 
   goCustomers() {
@@ -232,7 +240,20 @@ createPage({
       content: '截单后顾客无法再下单。',
       success: async (r) => {
         if (!r.confirm) return
-        const res = await call('admin', 'closeSale', { saleId: sale._id })
+        let res = await call('admin', 'closeSale', { saleId: sale._id })
+        if (!res.ok && res.code === 'PENDING_REVIEW_EXISTS') {
+          const pendingReviewCount = Number((res.detail && res.detail.pendingReviewCount) || 0)
+          const warnRes = await new Promise((resolve) => {
+            wx.showModal({
+              title: '有待确认订单',
+              content: `当前有 ${pendingReviewCount} 笔待确认订单。截单后仍可继续确认（也可留到下次开单时顺延处理）。是否继续截单？`,
+              success: resolve,
+              fail: () => resolve({ confirm: false }),
+            })
+          })
+          if (!warnRes.confirm) return
+          res = await call('admin', 'closeSale', { saleId: sale._id, ignorePendingReviewWarning: true })
+        }
         if (!res.ok) {
           wx.showToast({ title: res.message || '截单失败', icon: 'none' })
           return

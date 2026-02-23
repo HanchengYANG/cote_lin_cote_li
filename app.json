@@ -16,6 +16,7 @@
     "pages/admin/sale-draft/index",
     "pages/admin/sale-active-edit/index",
     "pages/admin/orders/index",
+    "pages/admin/pending-orders/index",
     "pages/admin/customers/index",
     "pages/admin/customer-detail/index",
     "pages/admin/order-detail/index",

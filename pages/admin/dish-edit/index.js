@@ -106,7 +106,7 @@ createPage({
     } catch (e) {
       // ignore
     }
-    wx.showToast({ title: '打开相册/相机...', icon: 'none', duration: 800 })
+    wx.showToast({ title: '打开相册/相机...', icon: 'none', duration: 800, __forceToast: true })
 
     let chooseRes = null
     this.setData({ choosing: true })

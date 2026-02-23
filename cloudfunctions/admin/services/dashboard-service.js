@@ -29,6 +29,16 @@ function createDashboardService(deps) {
       let activeSaleOpsSummary = null
       let canCompleteActiveSale = false
       let activeSaleIncompleteReason = null
+      let pendingReviewCount = 0
+      try {
+        const pendingOrders = await getAllByPaging(
+          (skip, limit) => db.collection('orders').where({ status: ORDER_STATUS.PENDING_REVIEW }).skip(skip).limit(limit),
+          { pageSize: 100 }
+        )
+        pendingReviewCount = Array.isArray(pendingOrders) ? pendingOrders.length : 0
+      } catch (err) {
+        pendingReviewCount = 0
+      }
       if (!currentSaleId) {
         try {
           const fallbackSales = await listSales(20)
@@ -156,6 +166,7 @@ function createDashboardService(deps) {
       return ok({
         activeSale,
         stats: { orderCount },
+        pendingReviewCount,
         activeSaleRevenueCents,
         activeSaleRevenueEuro,
         activeSaleDishStats,

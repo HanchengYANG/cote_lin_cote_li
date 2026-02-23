@@ -277,6 +277,11 @@ page {
   border-color: rgba(217, 45, 32, 0.12);
 }
 
+.quick-item.pending {
+  background: linear-gradient(180deg, #fffaf0 0%, #fffbeb 100%);
+  border-color: rgba(245, 158, 11, 0.22);
+}
+
 .quick-icon {
   font-size: 34rpx;
   line-height: 1;

@@ -52,37 +52,44 @@ function createOrderWriteService(deps) {
           if (!order.saleId) throwBiz('BAD_REQUEST', 'Order sale missing')
 
           const sale = await getSaleTx(tx, order.saleId)
-          if (!sale || sale.status !== 'OPEN') throwBiz('ORDER_LOCKED', '当前无法立即确认，请在下次开单时勾选延后确认')
+          const saleStatus = String((sale && sale.status) || '').trim()
+          if (!sale || (saleStatus !== 'OPEN' && saleStatus !== 'CLOSED' && saleStatus !== 'FULFILLING')) {
+            throwBiz('ORDER_LOCKED', '仅开单中/已截单/配送中可立即确认待确认订单')
+          }
 
           const normalizedConfigs = normalizeDishConfigs(sale.dishConfigs)
-          if (normalizedConfigs.length === 0) throwBiz('SALE_CONFIG_INVALID', 'Sale has no dishConfigs')
           const cfgMap = dishConfigMap(normalizedConfigs)
-          const outOfStock = []
           const orderItems = normalizeOrderItems(order.items)
           if (orderItems.length === 0) throwBiz('BAD_REQUEST', 'Order has no items')
+          const appendedDishIds = []
           for (const it of orderItems) {
-            const cfgItem = cfgMap.get(it.dishId)
-            if (!cfgItem) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
-            const remain = Math.max(0, toSafeInt(cfgItem.limitQty, 0) - toSafeInt(cfgItem.soldQty, 0))
-            if (it.qty > remain) {
-              outOfStock.push({
-                dishId: it.dishId,
-                requiredQty: it.qty,
-                remainingQty: remain,
-              })
+            let cfgItem = cfgMap.get(it.dishId)
+            if (!cfgItem) {
+              cfgItem = { dishId: it.dishId, limitQty: 0, soldQty: 0 }
+              cfgMap.set(it.dishId, cfgItem)
+              appendedDishIds.push(it.dishId)
             }
-          }
-          if (outOfStock.length > 0) throwBiz('OUT_OF_STOCK', 'Out of stock', { items: outOfStock })
-
-          for (const it of orderItems) {
-            const cfgItem = cfgMap.get(it.dishId)
-            cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) + it.qty)
+            const nextSoldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) + it.qty)
+            const nextLimitQty = Math.max(0, toSafeInt(cfgItem.limitQty, 0), nextSoldQty)
+            cfgItem.soldQty = nextSoldQty
+            cfgItem.limitQty = nextLimitQty
             cfgMap.set(it.dishId, cfgItem)
           }
-          const nextConfigs = normalizedConfigs.map((x) => {
+          const nextConfigs = []
+          const pushed = new Set()
+          for (const x of normalizedConfigs) {
             const cur = cfgMap.get(x.dishId)
-            return cur ? { dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty } : x
-          })
+            if (!cur) continue
+            nextConfigs.push({ dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty })
+            pushed.add(x.dishId)
+          }
+          for (const dishId of appendedDishIds) {
+            if (pushed.has(dishId)) continue
+            const cur = cfgMap.get(dishId)
+            if (!cur) continue
+            nextConfigs.push({ dishId, limitQty: cur.limitQty, soldQty: cur.soldQty })
+            pushed.add(dishId)
+          }
           await tx.collection('sales').doc(order.saleId).update({
             data: {
               updatedAt: db.serverDate(),
@@ -115,7 +122,7 @@ function createOrderWriteService(deps) {
               updatedAt: now,
             },
           })
-          await tx.collection('orderAuditLogs').add({
+          await tx.collection('order_audit_logs').add({
             data: {
               orderId,
               action: 'ADMIN_APPROVE_PENDING',
@@ -161,7 +168,7 @@ function createOrderWriteService(deps) {
               updatedAt: now,
             },
           })
-          await tx.collection('orderAuditLogs').add({
+          await tx.collection('order_audit_logs').add({
             data: {
               orderId,
               action: 'ADMIN_REJECT_PENDING',
@@ -202,7 +209,7 @@ function createOrderWriteService(deps) {
             updatedAt: now,
           },
         })
-        await db.collection('orderAuditLogs').add({
+        await db.collection('order_audit_logs').add({
           data: {
             orderId,
             action: 'ADMIN_UPDATE_SLOT',
@@ -325,7 +332,7 @@ function createOrderWriteService(deps) {
         }
 
         await db.collection('orders').doc(orderId).update({ data: nextData })
-        await db.collection('orderAuditLogs').add({
+        await db.collection('order_audit_logs').add({
           data: {
             orderId,
             action: 'ADMIN_UPDATE_FULFILLMENT',
@@ -454,7 +461,7 @@ function createOrderWriteService(deps) {
               updatedAt: now,
             },
           })
-          await tx.collection('orderAuditLogs').add({
+          await tx.collection('order_audit_logs').add({
             data: {
               orderId,
               action: order.status === ORDER_STATUS.ACTIVE ? 'ADMIN_UPDATE_ITEMS' : 'ADMIN_UPDATE_PENDING_ITEMS',
@@ -524,7 +531,7 @@ function createOrderWriteService(deps) {
       }
       if (txRes && txRes.alreadyCancelled) return ok({})
       const now = db.serverDate()
-      await db.collection('orderAuditLogs').add({
+      await db.collection('order_audit_logs').add({
         data: { orderId, action: 'CANCEL', byOpenId: openId, at: now },
       })
       return ok({})
