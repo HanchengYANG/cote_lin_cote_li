@@ -1,4 +1,5 @@
 const { centToEuro } = require('../../utils/format')
+const { call } = require('../../utils/api')
 const { getSnapshot, ensureFresh, invalidateSnapshot } = require('../../utils/app-snapshot')
 const { createPage } = require('../../utils/create-page')
 
@@ -46,6 +47,7 @@ createPage({
       saleId: '',
       status: '',
       deliveryTimeSlotLabel: '',
+      note: '',
     },
     profileSummary: {
       isComplete: false,
@@ -58,6 +60,11 @@ createPage({
     totalQty: 0,
     totalAmountEuro: '0.00',
     lastErrorMsg: '',
+    showNicknamePopup: false,
+    nicknameDraft: '',
+    nicknameSaving: false,
+    nicknamePopupError: '',
+    noticeCollapsed: true,
   },
 
   onLoad() {
@@ -89,7 +96,6 @@ createPage({
   },
 
   applySnapshot(snapshot, options = {}) {
-    const allowRedirect = !!options.allowRedirect
     const rawProfile = snapshot.profile || null
     const profileSummary = {
       isComplete: !!(rawProfile && rawProfile.isComplete),
@@ -97,11 +103,17 @@ createPage({
       addressCount: Number((rawProfile && rawProfile.addressCount) || 0),
       defaultAddressId: String((rawProfile && rawProfile.defaultAddressId) || ''),
     }
-    if (allowRedirect && !profileSummary.isComplete) {
-      this.redirectToProfile()
-      return true
-    }
     this.applyBootstrap(snapshot.sale, snapshot.dishes, rawProfile, snapshot.session || null)
+    const patch = {
+      showNicknamePopup: !profileSummary.isComplete,
+    }
+    if (profileSummary.isComplete) {
+      patch.nicknameSaving = false
+      patch.nicknamePopupError = ''
+    } else if (!String(this.data.nicknameDraft || '').trim()) {
+      patch.nicknameDraft = profileSummary.nickname
+    }
+    this.setData(patch)
     return true
   },
 
@@ -111,6 +123,7 @@ createPage({
       saleId: String((rawSale && rawSale.saleId) || ''),
       status: String((rawSale && rawSale.status) || ''),
       deliveryTimeSlotLabel: String((rawSale && rawSale.deliveryTimeSlotLabel) || ''),
+      note: String((rawSale && rawSale.note) || '').trim(),
     }
     const dishes = normalizeDishes(rawDishes).map((d) => {
       const inSale = !!d.inSale
@@ -158,17 +171,6 @@ createPage({
     })
   },
 
-  redirectToProfile() {
-    if (this._profileRedirecting) return
-    this._profileRedirecting = true
-    wx.navigateTo({
-      url: '/pages/profile-setup/index?from=index',
-      complete: () => {
-        this._profileRedirecting = false
-      },
-    })
-  },
-
   reportError(message, detail) {
     const msg = String(message || '未知错误')
     const now = new Date()
@@ -184,6 +186,51 @@ createPage({
 
   clearError() {
     this.setData({ lastErrorMsg: '' })
+  },
+
+  noop() {},
+
+  toggleNoticeCollapsed() {
+    this.setData({ noticeCollapsed: !this.data.noticeCollapsed })
+  },
+
+  onNicknamePopupInput(e) {
+    const nicknameDraft = String((e && e.detail && e.detail.value) || '')
+    const patch = { nicknameDraft }
+    if (this.data.nicknamePopupError) patch.nicknamePopupError = ''
+    this.setData(patch)
+  },
+
+  async saveNicknameFromPopup() {
+    if (!this.data.showNicknamePopup || this.data.nicknameSaving) return
+    const nickname = String(this.data.nicknameDraft || '').trim()
+    if (!nickname) {
+      this.setData({ nicknamePopupError: '请填写昵称' })
+      return
+    }
+    this.setData({ nicknameSaving: true, nicknamePopupError: '' })
+    const res = await call('customer', 'updateMyNickname', { nickname })
+    if (!res.ok) {
+      const msg = String(res.message || '保存失败')
+      this.setData({
+        nicknameSaving: false,
+        nicknamePopupError: msg,
+      })
+      return
+    }
+    invalidateSnapshot()
+    this.setData({
+      nicknameSaving: false,
+      nicknamePopupError: '',
+      showNicknamePopup: false,
+      profileSummary: {
+        ...(this.data.profileSummary || {}),
+        isComplete: true,
+        nickname,
+      },
+    })
+    wx.showToast({ title: '昵称已保存', icon: 'success' })
+    await this.reload({ silent: true, allowRedirect: false })
   },
 
   async reload(options = {}) {
@@ -255,7 +302,10 @@ createPage({
 
   goCheckout() {
     if (!this.data.profileSummary || !this.data.profileSummary.isComplete) {
-      wx.navigateTo({ url: '/pages/profile-setup/index?from=checkout' })
+      this.setData({
+        showNicknamePopup: true,
+        nicknamePopupError: '请先填写昵称',
+      })
       return
     }
     const items = []

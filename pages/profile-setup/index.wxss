@@ -35,14 +35,6 @@ page {
 .small {
   font-size: 24rpx;
 }
-.action-row {
-  display: flex;
-  gap: 12rpx;
-  margin-bottom: 8rpx;
-}
-.half-btn {
-  flex: 1;
-}
 .btn {
   background: #111;
   color: #fff;
@@ -54,4 +46,118 @@ page {
   background: transparent;
   color: #111;
   border: 1rpx solid rgba(0, 0, 0, 0.18);
+}
+
+.btn::after {
+  border: none;
+}
+
+.btn.mini {
+  width: auto;
+  min-width: 144rpx;
+  height: 58rpx;
+  line-height: 58rpx;
+  padding: 0 18rpx;
+  border-radius: 14rpx;
+  font-size: 24rpx;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.row .title {
+  margin-bottom: 0;
+}
+
+.picker {
+  margin-top: 12rpx;
+  border-radius: 16rpx;
+  border: 1rpx solid rgba(15, 23, 42, 0.08);
+  background: #f8fafc;
+  color: #101828;
+  padding: 18rpx 16rpx;
+  line-height: 1.35;
+  min-height: 28rpx;
+}
+
+.history-empty {
+  margin-top: 8rpx;
+}
+
+.order-list {
+  margin-top: 8rpx;
+  display: flex;
+  flex-direction: column;
+}
+
+.order-item {
+  padding: 16rpx 0;
+}
+
+.order-item + .order-item {
+  border-top: 1rpx solid rgba(15, 23, 42, 0.08);
+}
+
+.order-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  margin-bottom: 8rpx;
+}
+
+.order-item-mid {
+  margin-bottom: 6rpx;
+}
+
+.order-strong {
+  font-weight: 700;
+  font-size: 28rpx;
+  color: #101828;
+  line-height: 1.25;
+}
+
+.tag {
+  font-size: 22rpx;
+  padding: 4rpx 12rpx;
+  border-radius: 999rpx;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.tag.ok {
+  background: rgba(0, 0, 0, 0.08);
+}
+.tag.done {
+  background: rgba(22, 101, 52, 0.14);
+  color: #166534;
+}
+.tag.delivered {
+  background: rgba(15, 118, 110, 0.14);
+  color: #0f766e;
+}
+.tag.paid {
+  background: rgba(29, 78, 216, 0.12);
+  color: #1d4ed8;
+}
+
+.tag.cancel {
+  background: rgba(255, 0, 0, 0.10);
+  color: #b00020;
+}
+
+.tag.pending {
+  background: rgba(255, 186, 8, 0.2);
+  color: #7a4f00;
+}
+.tag.reject {
+  background: rgba(107, 114, 128, 0.14);
+  color: #4b5563;
+}
+
+.order-list-btn {
+  margin-top: 16rpx;
 }

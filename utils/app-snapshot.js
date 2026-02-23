@@ -30,6 +30,7 @@ function normalizeSale(raw) {
       saleId: '',
       status: '',
       deliveryTimeSlotLabel: '',
+      note: '',
       _id: '',
     }
   }
@@ -37,6 +38,7 @@ function normalizeSale(raw) {
     saleId: String(raw.saleId || raw._id || '').trim(),
     status: String(raw.status || '').trim(),
     deliveryTimeSlotLabel: String(raw.deliveryTimeSlotLabel || '').trim(),
+    note: String(raw.note || '').trim(),
     _id: String(raw._id || raw.saleId || '').trim(),
   }
 }

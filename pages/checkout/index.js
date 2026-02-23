@@ -9,6 +9,7 @@ const { showResultError } = require('../../utils/error-feedback')
 const PAYMENT_METHODS = [
   { label: '现金', value: 'cash' },
   { label: '微信转账', value: 'wechat_transfer' },
+  { label: '支付宝转账', value: 'alipay_transfer' },
 ]
 
 function findPaymentMethodIndex(value) {

@@ -38,7 +38,10 @@ function pickSaleIndex(options, prefSaleId, currentValue, preferredStatuses) {
 }
 
 function paymentMethodLabel(method) {
-  return String(method || '') === 'wechat_transfer' ? '转账' : '现金'
+  const v = String(method || '').trim()
+  if (v === 'wechat_transfer') return '微信转账'
+  if (v === 'alipay_transfer') return '支付宝转账'
+  return '现金'
 }
 
 function paidStatusLabel(status) {

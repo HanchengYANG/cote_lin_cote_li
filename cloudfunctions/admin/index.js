@@ -229,7 +229,8 @@ function normalizePaidStatus(input) {
 function normalizePaymentMethodForAdmin(input) {
   const v = String(input || '').trim()
   if (v === 'cash') return 'cash'
-  if (v === 'wechat_transfer' || v === 'transfer' || v === 'bank') return 'wechat_transfer'
+  if (v === 'wechat_transfer') return 'wechat_transfer'
+  if (v === 'alipay_transfer') return 'alipay_transfer'
   return ''
 }
 

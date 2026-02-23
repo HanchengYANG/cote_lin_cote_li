@@ -19,7 +19,7 @@
       <view class="list">
         <view class="item" wx:for="{{orders}}" wx:key="_id" bindtap="goDetail" data-id="{{item._id}}">
           <view class="top">
-            <view class="tag pending">{{item.statusText}}</view>
+            <view class="tag {{item.statusClass}}">{{item.statusText}}</view>
             <view class="muted small">{{item.createdAtText}}</view>
           </view>
           <view class="mid">

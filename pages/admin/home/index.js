@@ -44,6 +44,16 @@ createPage({
   },
 
   onLoad() {
+    this._skipNextOnShowRefresh = true
+    this.hydrateFromSnapshot()
+    this.reload({ silent: true })
+  },
+
+  onShow() {
+    if (this._skipNextOnShowRefresh) {
+      this._skipNextOnShowRefresh = false
+      return
+    }
     this.hydrateFromSnapshot()
     this.reload({ silent: true })
   },

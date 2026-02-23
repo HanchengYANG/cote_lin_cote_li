@@ -58,38 +58,84 @@
           <input class="input" data-k="country" value="{{manualAddress.country}}" placeholder="国家（默认 FR）" bindinput="onManualAddressInput" />
         </view>
       </view>
-      <view class="picker-row" wx:if="{{fulfillmentTypeDraft==='delivery'}}">
-        <picker mode="date" value="{{slotDate}}" bindchange="onPickDate">
-          <view class="picker">日期：{{slotDate || '请选择'}}</view>
-        </picker>
-        <picker mode="time" value="{{slotStart}}" bindchange="onPickStart">
-          <view class="picker">开始：{{slotStart || '请选择'}}</view>
-        </picker>
-        <picker mode="time" value="{{slotEnd}}" bindchange="onPickEnd">
-          <view class="picker">结束：{{slotEnd || '请选择'}}</view>
-        </picker>
+    </view>
+
+    <view class="card slot-card" wx:if="{{order && fulfillmentTypeDraft==='delivery'}}">
+      <view class="title">配送时间段</view>
+      <view class="slot-grid">
+        <view class="slot-cell">
+          <view class="label">日期</view>
+          <picker mode="date" value="{{slotDate}}" bindchange="onPickDate">
+            <view class="picker">{{slotDate || '请选择日期'}}</view>
+          </picker>
+        </view>
+        <view class="slot-cell">
+          <view class="label">开始</view>
+          <picker mode="time" value="{{slotStart}}" bindchange="onPickStart">
+            <view class="picker">{{slotStart || '请选择时间'}}</view>
+          </picker>
+        </view>
+        <view class="slot-cell">
+          <view class="label">结束</view>
+          <picker mode="time" value="{{slotEnd}}" bindchange="onPickEnd">
+            <view class="picker">{{slotEnd || '请选择时间'}}</view>
+          </picker>
+        </view>
       </view>
-      <view class="muted small" wx:if="{{fulfillmentTypeDraft==='delivery' && deliverySlotInput}}">当前时间段：{{deliverySlotInput}}</view>
+      <view class="slot-preview">当前时间段：{{deliverySlotInput || '未设置'}}</view>
+      <view class="muted small">修改后将在“保存修改”时生效</view>
     </view>
 
     <view class="card" wx:if="{{isPendingReview}}">
       <view class="title">待确认操作</view>
-      <view class="muted small">立即确认会立刻扣减当前开单库存；不操作则可在下次开单时勾选“延后确认”。</view>
-      <view class="row">
-        <button class="btn ghost" loading="{{approving}}" disabled="{{approving || rejecting}}" bindtap="onApproveNow">立即确认</button>
-        <button class="btn danger" loading="{{rejecting}}" disabled="{{approving || rejecting}}" bindtap="onReject">拒绝订单</button>
+      <view class="muted small">立即确认会立刻纳入本次备菜与履约；如需作废请使用下方“取消整单”。</view>
+      <view class="btn-row">
+        <button class="btn ghost" loading="{{approving}}" disabled="{{approving}}" bindtap="onApproveNow">立即确认</button>
       </view>
     </view>
 
     <view class="card" wx:if="{{order}}">
-      <view class="title">付款方式</view>
-      <picker mode="selector" range="{{paymentMethodOptions}}" range-key="label" value="{{paymentMethodIndex}}" bindchange="onPickPaymentMethod">
-        <view class="picker">付款方式：{{paymentMethodLabel}}</view>
-      </picker>
-      <view class="muted small">收款状态：{{paymentPaidStatusText}}</view>
-      <button class="btn ghost pay-btn" loading="{{savingPaymentMethod}}" disabled="{{savingPaymentMethod || saving || cancelling}}" bindtap="onSavePaymentMethod">
-        保存付款方式
-      </button>
+      <view class="title">付款与履约状态</view>
+      <view class="field">
+        <view class="label">付款方式</view>
+        <picker
+          mode="selector"
+          range="{{paymentMethodOptions}}"
+          range-key="label"
+          value="{{paymentMethodIndex}}"
+          bindchange="onPickPaymentMethod"
+          disabled="{{!canEditPaymentMethod}}"
+        >
+          <view class="picker {{canEditPaymentMethod ? '' : 'picker-disabled'}}">付款方式：{{paymentMethodLabel}}</view>
+        </picker>
+      </view>
+      <view class="field">
+        <view class="label">收款状态</view>
+        <picker
+          mode="selector"
+          range="{{paidStatusOptions}}"
+          range-key="label"
+          value="{{paidStatusIndex}}"
+          bindchange="onPickPaidStatus"
+          disabled="{{!canEditProgressStatus}}"
+        >
+          <view class="picker {{canEditProgressStatus ? '' : 'picker-disabled'}}">收款状态：{{paidStatusOptions[paidStatusIndex].label}}</view>
+        </picker>
+      </view>
+      <view class="field">
+        <view class="label">交货状态</view>
+        <picker
+          mode="selector"
+          range="{{handoffStatusOptions}}"
+          range-key="label"
+          value="{{handoffStatusIndex}}"
+          bindchange="onPickHandoffStatus"
+          disabled="{{!canEditProgressStatus}}"
+        >
+          <view class="picker {{canEditProgressStatus ? '' : 'picker-disabled'}}">交货状态：{{handoffStatusOptions[handoffStatusIndex].label}}</view>
+        </picker>
+      </view>
+      <view class="muted small" wx:if="{{!canEditProgressStatus}}">仅有效订单可修改收款状态与交货状态。</view>
     </view>
 
     <order-editor
@@ -100,16 +146,48 @@
       can-cancel-order="{{canCancelOrder}}"
       saving="{{saving}}"
       cancelling="{{cancelling}}"
+      can-add-items="{{canEditItems}}"
       show-payment="{{false}}"
       show-payment-status="{{true}}"
       show-fulfillment="{{false}}"
       show-contact="{{false}}"
       edit-hint="店主可直接修改本单菜品数量；如需整单作废请点“取消整单”。"
       lock-hint="订单已取消，不可编辑。"
+      bindadditem="onOpenAddDishPicker"
       bindqtychange="onQtyChange"
       bindremoveitem="onRemoveItem"
       bindsave="onSaveItems"
       bindcancelorder="onCancelOrder"
     />
+
+    <view class="sheet-mask" wx:if="{{showDishPicker}}" bindtap="onCloseDishPicker">
+      <view class="sheet-card" catchtap="noop">
+        <view class="sheet-head">
+          <view class="sheet-title">新增菜品</view>
+          <view class="sheet-close" bindtap="onCloseDishPicker">关闭</view>
+        </view>
+        <view class="muted small">选择一个菜品加入当前订单（已存在则数量 +1）</view>
+        <scroll-view class="sheet-list" scroll-y>
+          <view class="sheet-empty muted" wx:if="{{loadingDishPicker}}">加载中...</view>
+          <view class="sheet-empty muted" wx:elif="{{!allDishesForPick.length}}">暂无菜品</view>
+          <view
+            class="sheet-item"
+            wx:for="{{allDishesForPick}}"
+            wx:key="_id"
+            data-id="{{item._id}}"
+            bindtap="onPickDishToAdd"
+          >
+            <view class="sheet-item-main">
+              <view class="sheet-item-name">{{item.name}}</view>
+              <view class="sheet-item-meta">
+                <text wx:if="{{!item.isActive}}" class="sheet-tag muted-tag">已下架</text>
+                <text>ID: {{item._id}}</text>
+              </view>
+            </view>
+            <view class="sheet-price">€{{item.priceEuro}}</view>
+          </view>
+        </scroll-view>
+      </view>
+    </view>
   </view>
 </scroll-view>

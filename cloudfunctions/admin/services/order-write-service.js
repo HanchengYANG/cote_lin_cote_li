@@ -388,11 +388,35 @@ function createOrderWriteService(deps) {
             const dishId = String((it && it.dishId) || '').trim()
             const qty = Number(it && it.qty)
             if (!dishId || !Number.isFinite(qty) || qty < 0) throwBiz('BAD_REQUEST', 'Invalid items')
-            if (!oldMap.has(dishId)) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
             nextQtyMap.set(dishId, Math.floor(qty))
           }
           for (const dishId of oldMap.keys()) {
             if (!nextQtyMap.has(dishId)) nextQtyMap.set(dishId, 0)
+          }
+
+          const unknownDishIds = Array.from(nextQtyMap.keys()).filter((dishId) => !oldMap.has(dishId))
+          const dishRowMap = new Map()
+          if (unknownDishIds.length > 0) {
+            const chunkSize = 10
+            for (let i = 0; i < unknownDishIds.length; i += chunkSize) {
+              const chunk = unknownDishIds.slice(i, i + chunkSize)
+              let rows = []
+              try {
+                const r = await tx.collection('dishes').where({ _id: _.in(chunk) }).get()
+                rows = (r && r.data) || []
+              } catch (err) {
+                rows = []
+              }
+              for (const row of rows) {
+                const id = String((row && row._id) || '').trim()
+                if (!id) continue
+                dishRowMap.set(id, row)
+              }
+            }
+            const missingDishIds = unknownDishIds.filter((dishId) => !dishRowMap.has(dishId))
+            if (missingDishIds.length > 0) {
+              throwBiz('ITEM_NOT_FOUND', 'Dish not found', { missingDishIds })
+            }
           }
 
           const nextItems = []
@@ -401,8 +425,12 @@ function createOrderWriteService(deps) {
           for (const [dishId, nextQty] of nextQtyMap.entries()) {
             if (nextQty <= 0) continue
             const old = oldMap.get(dishId)
-            const unitPriceCents = toSafeInt(old && old.unitPriceCents, 0)
-            const dishName = String((old && old.dishName) || '')
+            const dishRow = dishRowMap.get(dishId) || null
+            const unitPriceCents = Math.max(
+              0,
+              toSafeInt(old && (old.unitPriceCents != null ? old.unitPriceCents : old.priceCents), toSafeInt(dishRow && dishRow.priceCents, 0))
+            )
+            const dishName = String((old && old.dishName) || (dishRow && dishRow.name) || '')
             if (!dishName) throwBiz('BAD_REQUEST', 'Invalid order item')
             const lineTotalCents = unitPriceCents * nextQty
             totalQty += nextQty
@@ -415,14 +443,19 @@ function createOrderWriteService(deps) {
           let saleVersionSnapshot = toSafeInt(order.saleConfigVersionSnapshot, 0)
           if (order.status === ORDER_STATUS.ACTIVE && order.saleId) {
             const sale = await getSaleTx(tx, order.saleId)
-            if (sale && Array.isArray(sale.dishConfigs) && sale.dishConfigs.length > 0) {
+            if (sale) {
               const cfgMap = dishConfigMap(sale.dishConfigs)
+              const appendedDishIds = []
               for (const [dishId, nextQty] of nextQtyMap.entries()) {
                 const oldQty = toSafeInt(oldMap.get(dishId) && oldMap.get(dishId).qty, 0)
                 const delta = nextQty - oldQty
                 if (delta === 0) continue
-                const cfgItem = cfgMap.get(dishId)
-                if (!cfgItem) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
+                let cfgItem = cfgMap.get(dishId)
+                if (!cfgItem) {
+                  cfgItem = { dishId, limitQty: 0, soldQty: 0 }
+                  cfgMap.set(dishId, cfgItem)
+                  appendedDishIds.push(dishId)
+                }
                 if (delta > 0) {
                   const remain = Math.max(0, toSafeInt(cfgItem.limitQty, 0) - toSafeInt(cfgItem.soldQty, 0))
                   if (delta > remain) {
@@ -438,16 +471,42 @@ function createOrderWriteService(deps) {
                 cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) + delta)
                 cfgMap.set(dishId, cfgItem)
               }
-              const nextConfigs = normalizeDishConfigs(sale.dishConfigs).map((x) => {
+              const nextConfigs = []
+              const pushed = new Set()
+              for (const x of normalizeDishConfigs(sale.dishConfigs)) {
                 const cur = cfgMap.get(x.dishId)
-                return cur ? { dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty } : x
-              })
+                if (!cur) continue
+                nextConfigs.push({ dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty })
+                pushed.add(x.dishId)
+              }
+              for (const dishId of appendedDishIds) {
+                if (pushed.has(dishId)) continue
+                const cur = cfgMap.get(dishId)
+                if (!cur) continue
+                nextConfigs.push({ dishId, limitQty: cur.limitQty, soldQty: cur.soldQty })
+                pushed.add(dishId)
+              }
+              const dishSnapshotMap = new Map()
+              for (const [dishId, row] of dishRowMap.entries()) {
+                dishSnapshotMap.set(dishId, {
+                  name: String((row && row.name) || '').trim(),
+                  priceCents: Math.max(0, toSafeInt(row && row.priceCents, 0)),
+                })
+              }
+              for (const it of nextItems) {
+                if (!dishSnapshotMap.has(it.dishId)) {
+                  dishSnapshotMap.set(it.dishId, {
+                    name: String(it.dishName || '').trim(),
+                    priceCents: Math.max(0, toSafeInt(it.unitPriceCents, 0)),
+                  })
+                }
+              }
               await tx.collection('sales').doc(order.saleId).update({
                 data: {
                   updatedAt: db.serverDate(),
                 },
               })
-              await replaceSaleItemsForSaleTx(tx, order.saleId, nextConfigs)
+              await replaceSaleItemsForSaleTx(tx, order.saleId, nextConfigs, { dishSnapshotMap })
             }
             saleVersionSnapshot = toSafeInt(sale && sale.saleConfigVersion, saleVersionSnapshot)
           }

@@ -76,6 +76,7 @@ function createReadService(deps) {
         saleId: String((sale && sale._id) || ''),
         status: saleStatus || '',
         deliveryTimeSlotLabel: String((sale && sale.deliveryTimeSlotLabel) || ''),
+        note: String((sale && sale.note) || '').trim(),
       }
       let cfgMap = new Map()
       if (sale && saleStatus === 'OPEN') {
