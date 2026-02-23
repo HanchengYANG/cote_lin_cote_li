@@ -43,6 +43,11 @@ const ORDER_STATUS = {
   REJECTED: 'REJECTED',
 }
 
+const HANDOFF_STATUS = {
+  PENDING: 'PENDING',
+  DELIVERED: 'DELIVERED',
+}
+
 function normalizePaymentMethod(input) {
   const v = String(input || '').trim()
   if (v === 'cash') return 'cash'

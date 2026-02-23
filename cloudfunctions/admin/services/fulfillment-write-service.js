@@ -69,7 +69,7 @@ function createFulfillmentWriteService(deps) {
       } catch (err) {
         const msg = String((err && (err.errMsg || err.message)) || '')
         if (/collection not exists|Db or Table not exist/i.test(msg)) {
-          return fail('COLLECTION_NOT_FOUND', '请先创建数据库集合 saleProductionProgress', msg)
+          return fail('COLLECTION_NOT_FOUND', '请先创建数据库集合 sale_production_progress', msg)
         }
         return fail('TX_FAILED', 'Update production progress failed', msg || String(err))
       }
@@ -129,7 +129,7 @@ function createFulfillmentWriteService(deps) {
       } catch (err) {
         const msg = String((err && (err.errMsg || err.message)) || '')
         if (/collection not exists|Db or Table not exist/i.test(msg)) {
-          return fail('COLLECTION_NOT_FOUND', '请先创建数据库集合 saleFulfillmentPlans', msg)
+          return fail('COLLECTION_NOT_FOUND', '请先创建数据库集合 sale_fulfillment_plans', msg)
         }
         return fail('TX_FAILED', 'Save fulfillment order failed', String(err && err.message))
       }
@@ -216,7 +216,7 @@ function createFulfillmentWriteService(deps) {
               updatedAt: now,
             },
           })
-          await tx.collection('orderAuditLogs').add({
+          await tx.collection('order_audit_logs').add({
             data: {
               orderId,
               action: 'ADMIN_UPDATE_PAYMENT_METHOD',
@@ -326,7 +326,7 @@ function createFulfillmentWriteService(deps) {
           }
 
           await tx.collection('orders').doc(orderId).update({ data: updateData })
-          await tx.collection('orderAuditLogs').add({
+          await tx.collection('order_audit_logs').add({
             data: {
               orderId,
               action: 'ADMIN_UPDATE_FULFILLMENT_PROGRESS',

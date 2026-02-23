@@ -155,6 +155,10 @@
       <view class="card">
         <view class="title">当前操作</view>
         <view class="quick-grid">
+          <view class="quick-item pending" wx:if="{{pendingReviewCount>0}}" hover-class="quick-item-hover" bindtap="goPendingOrders">
+            <text class="quick-icon">🟠</text>
+            <text class="quick-label">待确认订单（{{pendingReviewCount}}）</text>
+          </view>
           <block wx:if="{{!saleKnown}}">
             <view class="quick-item disabled">
               <text class="quick-icon">⏳</text>

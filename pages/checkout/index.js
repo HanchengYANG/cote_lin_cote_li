@@ -4,6 +4,7 @@ const { outOfStockMessage } = require('../../utils/order-errors')
 const { normalizePhone, isPhoneValid } = require('../../utils/phone')
 const { getSnapshot, invalidateSnapshot } = require('../../utils/app-snapshot')
 const { createPage } = require('../../utils/create-page')
+const { showResultError } = require('../../utils/error-feedback')
 
 const PAYMENT_METHODS = [
   { label: '现金', value: 'cash' },
@@ -301,7 +302,7 @@ createPage({
           cartItems = prevItems.filter((it) => allowedSet.has(it.dishId))
           const removedCount = prevItems.length - cartItems.length
           if (removedCount > 0) {
-            wx.showToast({ title: `已移除 ${removedCount} 个非本次开单菜品`, icon: 'none' })
+            wx.showToast({ title: `已移除 ${removedCount} 个非本次开单菜品`, icon: 'none', __forceToast: true })
           }
         }
       } else {
@@ -540,11 +541,11 @@ createPage({
         return
       }
       if (res.code === 'PROFILE_INCOMPLETE') {
-        wx.showToast({ title: res.message || '请先完善资料', icon: 'none' })
+        await showResultError(res, '请先完善资料')
         wx.navigateTo({ url: '/pages/profile-setup/index?from=checkout' })
         return
       }
-      wx.showToast({ title: res.message || '下单失败', icon: 'none' })
+      await showResultError(res, '下单失败')
       return
     }
     invalidateSnapshot()

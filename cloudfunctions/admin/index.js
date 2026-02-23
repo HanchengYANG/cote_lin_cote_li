@@ -252,7 +252,7 @@ async function getSaleFulfillmentPlan(saleId) {
   const id = String(saleId || '').trim()
   if (!id) return null
   try {
-    const r = await db.collection('saleFulfillmentPlans').doc(id).get()
+    const r = await db.collection('sale_fulfillment_plans').doc(id).get()
     const data = r && r.data ? r.data : null
     if (!data) return null
     return {
@@ -276,10 +276,10 @@ async function saveSaleFulfillmentPlan(saleId, orderIds, openId) {
     updatedByOpenId: openId,
   }
   if (existing) {
-    await db.collection('saleFulfillmentPlans').doc(id).update({ data: payload })
+    await db.collection('sale_fulfillment_plans').doc(id).update({ data: payload })
     return { ...existing, ...payload }
   }
-  await db.collection('saleFulfillmentPlans').doc(id).set({
+  await db.collection('sale_fulfillment_plans').doc(id).set({
     data: {
       createdAt: now,
       createdByOpenId: openId,
@@ -455,7 +455,7 @@ async function getSaleProductionProgress(saleId) {
   const id = String(saleId || '').trim()
   if (!id) return null
   try {
-    const r = await db.collection('saleProductionProgress').doc(id).get()
+    const r = await db.collection('sale_production_progress').doc(id).get()
     const data = r && r.data ? r.data : null
     if (!data) return null
     return {
@@ -542,10 +542,10 @@ async function saveSaleProductionProgressBoard(saleId, items, openId) {
   }
   const existing = await getSaleProductionProgress(id)
   if (existing) {
-    await db.collection('saleProductionProgress').doc(id).update({ data: payload })
+    await db.collection('sale_production_progress').doc(id).update({ data: payload })
     return { ...existing, ...payload }
   }
-  await db.collection('saleProductionProgress').doc(id).set({
+  await db.collection('sale_production_progress').doc(id).set({
     data: {
       createdAt: now,
       createdByOpenId: openId,
