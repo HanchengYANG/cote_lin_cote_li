@@ -62,8 +62,7 @@ function decorateProductionItem(item) {
 
 createPage({
   data: {
-    initialLoading: true,
-    initialLoaded: false,
+    loadPhase: 'loading',
     loadingSales: false,
     loadingBoard: false,
     operatingDishId: '',
@@ -91,15 +90,16 @@ createPage({
   async reload() {
     if (this.data.loadingSales) return
     this.setData({ loadingSales: true })
-    const finishInitial = () => {
-      if (this.data.initialLoading || !this.data.initialLoaded) {
-        this.setData({ initialLoading: false, initialLoaded: true })
+    const finishLoadPhase = () => {
+      if (this.data.loadPhase !== 'ready') {
+        this.setData({ loadPhase: 'ready' })
       }
     }
+    if (this.data.loadPhase !== 'ready') this.setData({ loadPhase: 'loading' })
     try {
       const salesRes = await call('admin', 'listFulfillmentSales', { limit: 50, includeCompleted: true })
       if (!salesRes.ok) {
-        finishInitial()
+        finishLoadPhase()
         this.setData({
           saleOptions: [{ label: '加载失败', value: '', status: '' }],
           saleIndex: 0,
@@ -126,7 +126,7 @@ createPage({
         saleIndex,
         saleLabel: picked.label || '未选择',
       })
-      finishInitial()
+      finishLoadPhase()
       await this.loadBoard()
     } finally {
       this.setData({ loadingSales: false })
@@ -146,9 +146,9 @@ createPage({
   async loadBoard() {
     const option = this.data.saleOptions[this.data.saleIndex] || null
     const saleId = String((option && option.value) || '').trim()
-    const finishInitial = () => {
-      if (this.data.initialLoading || !this.data.initialLoaded) {
-        this.setData({ initialLoading: false, initialLoaded: true })
+    const finishLoadPhase = () => {
+      if (this.data.loadPhase !== 'ready') {
+        this.setData({ loadPhase: 'ready' })
       }
     }
     if (!saleId) {
@@ -157,14 +157,14 @@ createPage({
         canEdit: false,
         production: { totalNeedQty: 0, totalPreparedQty: 0, completionPercent: 0, items: [] },
       })
-      finishInitial()
+      finishLoadPhase()
       return
     }
     if (this.data.loadingBoard) return
     this.setData({ loadingBoard: true })
     const res = await call('admin', 'getSaleProductionBoard', { saleId })
     this.setData({ loadingBoard: false })
-    finishInitial()
+    finishLoadPhase()
     if (!res.ok) {
       this.setData({
         sale: null,

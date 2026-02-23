@@ -12,8 +12,12 @@ In WeChat DevTools:
 2. Install dependencies per function folder (`npm install`).
 3. Upload and deploy each function.
 
-You must create/modify `adminConfig/main` in the database:
-- `adminOpenIds`: add your `openid` here to become admin
-- `activeSaleId`: keep `null` (system will manage it)
+You must create/modify these documents in the database:
+- `system_admins/main`
+  - `adminOpenIds`: add your `openid` here to become admin
+- `system_runtime_state/main`
+  - `currentSaleId`: `null` initially (system will manage it)
+- `delivery_rules/main`
+  - `deliveryMinByCity`, `deliveryMinDefaultCents` (can start empty/default)
 
 Tip: run cloud function `auth` action `getMyOpenId` to get your current `openid`.

@@ -11,7 +11,7 @@
     <block wx:elif="{{!isAdmin}}">
       <view class="card">
         <view class="muted">无权限</view>
-        <view class="muted small">请把你的 openid 加入云数据库 `adminConfig/main.adminOpenIds`</view>
+        <view class="muted small">请把你的 openid 加入云数据库 `system_admins/main.adminOpenIds`</view>
         <view class="muted small">我的 openid：{{myOpenId}}</view>
         <button class="btn ghost mini-btn" size="mini" bindtap="copyOpenId">复制 openid</button>
       </view>

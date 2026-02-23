@@ -1,0 +1,537 @@
+function createOrderWriteService(deps) {
+  const {
+    db,
+    _,
+    ok,
+    fail,
+    getAllByPaging,
+    ORDER_STATUS,
+    HANDOFF_STATUS,
+    throwBiz,
+    getSaleTx,
+    normalizeDishConfigs,
+    dishConfigMap,
+    toSafeInt,
+    normalizeOrderItems,
+    replaceSaleItemsForSaleTx,
+    parseAndValidateDeliverySlot,
+    normalizePhone,
+    normalizeAddressPayload,
+    normalizeStoredAddresses,
+    isPhoneValid,
+    extractOrderAddressSnapshot,
+  } = deps
+
+  return {
+    async listPendingOrders(event) {
+      const saleId = String(event.saleId || '').trim()
+      const where = { status: ORDER_STATUS.PENDING_REVIEW }
+      if (saleId) where.saleId = saleId
+      const orders = await getAllByPaging((skip, limit) => db.collection('orders').where(where).skip(skip).limit(limit), {
+        pageSize: 100,
+      })
+      return ok({ orders })
+    },
+
+    async approvePendingOrderNow(event, ctx) {
+      const openId = ctx && ctx.openId
+      const orderId = String(event.orderId || '').trim()
+      if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
+      const slotLabelInput = String(event.deliveryTimeSlotLabel || '').trim()
+      try {
+        await db.runTransaction(async (tx) => {
+          let order
+          try {
+            const got = await tx.collection('orders').doc(orderId).get()
+            order = got.data
+          } catch (err) {
+            throwBiz('ORDER_NOT_FOUND', 'Order not found')
+          }
+          if (!order) throwBiz('ORDER_NOT_FOUND', 'Order not found')
+          if (order.status !== ORDER_STATUS.PENDING_REVIEW) throwBiz('ORDER_NOT_PENDING', 'Order is not pending')
+          if (!order.saleId) throwBiz('BAD_REQUEST', 'Order sale missing')
+
+          const sale = await getSaleTx(tx, order.saleId)
+          if (!sale || sale.status !== 'OPEN') throwBiz('ORDER_LOCKED', '当前无法立即确认，请在下次开单时勾选延后确认')
+
+          const normalizedConfigs = normalizeDishConfigs(sale.dishConfigs)
+          if (normalizedConfigs.length === 0) throwBiz('SALE_CONFIG_INVALID', 'Sale has no dishConfigs')
+          const cfgMap = dishConfigMap(normalizedConfigs)
+          const outOfStock = []
+          const orderItems = normalizeOrderItems(order.items)
+          if (orderItems.length === 0) throwBiz('BAD_REQUEST', 'Order has no items')
+          for (const it of orderItems) {
+            const cfgItem = cfgMap.get(it.dishId)
+            if (!cfgItem) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
+            const remain = Math.max(0, toSafeInt(cfgItem.limitQty, 0) - toSafeInt(cfgItem.soldQty, 0))
+            if (it.qty > remain) {
+              outOfStock.push({
+                dishId: it.dishId,
+                requiredQty: it.qty,
+                remainingQty: remain,
+              })
+            }
+          }
+          if (outOfStock.length > 0) throwBiz('OUT_OF_STOCK', 'Out of stock', { items: outOfStock })
+
+          for (const it of orderItems) {
+            const cfgItem = cfgMap.get(it.dishId)
+            cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) + it.qty)
+            cfgMap.set(it.dishId, cfgItem)
+          }
+          const nextConfigs = normalizedConfigs.map((x) => {
+            const cur = cfgMap.get(x.dishId)
+            return cur ? { dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty } : x
+          })
+          await tx.collection('sales').doc(order.saleId).update({
+            data: {
+              updatedAt: db.serverDate(),
+            },
+          })
+          await replaceSaleItemsForSaleTx(tx, order.saleId, nextConfigs)
+
+          let deliveryTimeSlotLabelSnapshot = order.deliveryTimeSlotLabelSnapshot || null
+          if (order.fulfillmentType === 'delivery') {
+            deliveryTimeSlotLabelSnapshot = slotLabelInput || String(sale.deliveryTimeSlotLabel || '').trim()
+            if (!deliveryTimeSlotLabelSnapshot) throwBiz('BAD_REQUEST', 'Missing delivery slot')
+          }
+
+          const now = db.serverDate()
+          await tx.collection('orders').doc(orderId).update({
+            data: {
+              status: ORDER_STATUS.ACTIVE,
+              handoffStatus: HANDOFF_STATUS.PENDING,
+              handedOffAt: _.remove,
+              handedOffByOpenId: _.remove,
+              deliveryTimeSlotLabelSnapshot,
+              pendingReason: _.remove,
+              pendingDetail: _.remove,
+              pendingAt: _.remove,
+              approvedAt: now,
+              customerLocked: true,
+              customerLockedAt: now,
+              customerLockedReason: 'ADMIN_APPROVED_PENDING',
+              saleConfigVersionSnapshot: toSafeInt(sale.saleConfigVersion, 0),
+              updatedAt: now,
+            },
+          })
+          await tx.collection('orderAuditLogs').add({
+            data: {
+              orderId,
+              action: 'ADMIN_APPROVE_PENDING',
+              byOpenId: openId,
+              at: now,
+            },
+          })
+        })
+      } catch (err) {
+        if (err && err.code) return fail(err.code, err.message || 'Approve failed', err.detail)
+        return fail('TX_FAILED', 'Approve failed', String(err && err.message))
+      }
+      return ok({})
+    },
+
+    async rejectPendingOrder(event, ctx) {
+      const openId = ctx && ctx.openId
+      const orderId = String(event.orderId || '').trim()
+      if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
+      const rejectedReason = String(event.rejectedReason || '').trim().slice(0, 200)
+      try {
+        await db.runTransaction(async (tx) => {
+          let order = null
+          try {
+            const got = await tx.collection('orders').doc(orderId).get()
+            order = got.data
+          } catch (err) {
+            order = null
+          }
+          if (!order) throwBiz('ORDER_NOT_FOUND', 'Order not found')
+          if (order.status !== ORDER_STATUS.PENDING_REVIEW) throwBiz('ORDER_NOT_PENDING', 'Order is not pending')
+
+          const now = db.serverDate()
+          await tx.collection('orders').doc(orderId).update({
+            data: {
+              status: ORDER_STATUS.REJECTED,
+              rejectedReason,
+              rejectedAt: now,
+              rejectedByOpenId: openId,
+              pendingReason: _.remove,
+              pendingDetail: _.remove,
+              pendingAt: _.remove,
+              updatedAt: now,
+            },
+          })
+          await tx.collection('orderAuditLogs').add({
+            data: {
+              orderId,
+              action: 'ADMIN_REJECT_PENDING',
+              byOpenId: openId,
+              at: now,
+            },
+          })
+        })
+      } catch (err) {
+        if (err && err.code) return fail(err.code, err.message || 'Reject failed', err.detail)
+        return fail('TX_FAILED', 'Reject failed', String(err && err.message))
+      }
+      return ok({})
+    },
+
+    async updateOrderDeliverySlot(event, ctx) {
+      const openId = ctx && ctx.openId
+      const orderId = String(event.orderId || '').trim()
+      if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
+      let slotLabel = String(event.deliveryTimeSlotLabel || '').trim()
+      if (!slotLabel) {
+        const slot = parseAndValidateDeliverySlot(event)
+        if (!slot.ok) return fail('BAD_REQUEST', slot.message)
+        slotLabel = slot.deliveryTimeSlotLabel
+      }
+      try {
+        const r = await db.collection('orders').doc(orderId).get()
+        const order = r.data
+        if (!order) return fail('ORDER_NOT_FOUND', 'Order not found')
+        if (order.fulfillmentType !== 'delivery') return fail('BAD_REQUEST', 'Only delivery order can update slot')
+        if (order.status !== ORDER_STATUS.ACTIVE && order.status !== ORDER_STATUS.PENDING_REVIEW) {
+          return fail('ORDER_NOT_EDITABLE', 'Order is not editable')
+        }
+        const now = db.serverDate()
+        await db.collection('orders').doc(orderId).update({
+          data: {
+            deliveryTimeSlotLabelSnapshot: slotLabel,
+            updatedAt: now,
+          },
+        })
+        await db.collection('orderAuditLogs').add({
+          data: {
+            orderId,
+            action: 'ADMIN_UPDATE_SLOT',
+            byOpenId: openId,
+            at: now,
+          },
+        })
+      } catch (err) {
+        return fail('TX_FAILED', 'Update delivery slot failed', String(err && err.message))
+      }
+      return ok({})
+    },
+
+    async updateOrderFulfillment(event, ctx) {
+      const openId = ctx && ctx.openId
+      const orderId = String(event.orderId || '').trim()
+      const fulfillmentType = String(event.fulfillmentType || '').trim()
+      const requestedAddressId = String(event.addressId || '').trim()
+      const hasManualAddressInput = !!(event && event.address)
+      const hasPhoneInput = Object.prototype.hasOwnProperty.call(event || {}, 'phone')
+      const requestedPhone = hasPhoneInput ? normalizePhone(event.phone) : ''
+      const requestedManualAddress = event && event.address ? normalizeAddressPayload(event.address) : null
+      if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
+      if (fulfillmentType !== 'delivery' && fulfillmentType !== 'pickup') return fail('BAD_REQUEST', 'Invalid fulfillmentType')
+      if (hasManualAddressInput && !requestedManualAddress) return fail('INVALID_ADDRESS', '手动地址格式不正确')
+      let slotLabel = String(event.deliveryTimeSlotLabel || '').trim()
+      if (!slotLabel && fulfillmentType === 'delivery') {
+        const slot = parseAndValidateDeliverySlot(event)
+        if (slot.ok) slotLabel = slot.deliveryTimeSlotLabel
+      }
+      try {
+        const r = await db.collection('orders').doc(orderId).get()
+        const order = r.data
+        if (!order) return fail('ORDER_NOT_FOUND', 'Order not found')
+        if (order.status !== ORDER_STATUS.ACTIVE && order.status !== ORDER_STATUS.PENDING_REVIEW) {
+          return fail('ORDER_NOT_EDITABLE', 'Order is not editable')
+        }
+
+        let customerAddresses = []
+        if (order.customerOpenId) {
+          try {
+            const r2 = await db.collection('customer_addresses').where({ customerOpenId: order.customerOpenId }).get()
+            customerAddresses = normalizeStoredAddresses((r2 && r2.data) || [])
+          } catch (err) {
+            customerAddresses = []
+          }
+        }
+
+        const currentPhone = normalizePhone(order.contact && order.contact.phone)
+        const nextData = {
+          fulfillmentType,
+          contact: {
+            phone: hasPhoneInput ? requestedPhone : currentPhone,
+          },
+          updatedAt: db.serverDate(),
+        }
+        let addressSource = 'unchanged'
+
+        if (fulfillmentType === 'delivery') {
+          let nextAddress = null
+          let nextAddressId = null
+
+          const selectedSaved = requestedAddressId ? customerAddresses.find((x) => x.id === requestedAddressId) || null : null
+          if (requestedAddressId && !selectedSaved) return fail('BAD_REQUEST', '所选客户地址不存在')
+          if (selectedSaved) {
+            nextAddress = {
+              label: selectedSaved.label,
+              line1: selectedSaved.line1,
+              line2: selectedSaved.line2,
+              postalCode: selectedSaved.postalCode,
+              city: selectedSaved.city,
+              country: 'FR',
+            }
+            nextAddressId = selectedSaved.id
+            addressSource = 'addressId'
+            if (!nextData.contact.phone && isPhoneValid(selectedSaved.phone)) nextData.contact.phone = selectedSaved.phone
+          } else if (requestedManualAddress) {
+            nextAddress = {
+              label: requestedManualAddress.label,
+              line1: requestedManualAddress.line1,
+              line2: requestedManualAddress.line2,
+              postalCode: requestedManualAddress.postalCode,
+              city: requestedManualAddress.city,
+              country: 'FR',
+            }
+            nextAddressId = null
+            addressSource = 'manual'
+          } else {
+            const existingAddress = extractOrderAddressSnapshot(order.address)
+            if (existingAddress) {
+              nextAddress = existingAddress
+              const oldAddressId = String(order.addressId || '').trim()
+              nextAddressId = oldAddressId || null
+            }
+          }
+          if (!nextAddress) return fail('BAD_REQUEST', '配送订单缺少有效地址')
+          if (!isPhoneValid(nextData.contact.phone)) return fail('INVALID_PHONE', '请填写有效电话')
+          nextData.address = nextAddress
+          nextData.addressId = nextAddressId
+
+          if (!slotLabel) slotLabel = String(order.deliveryTimeSlotLabelSnapshot || '').trim()
+          if (!slotLabel && order.saleId) {
+            try {
+              const saleRes = await db.collection('sales').doc(order.saleId).get()
+              const sale = saleRes.data
+              slotLabel = String((sale && sale.deliveryTimeSlotLabel) || '').trim()
+            } catch (err) {
+              slotLabel = ''
+            }
+          }
+          if (!slotLabel) return fail('BAD_REQUEST', '配送需要时间段')
+          nextData.deliveryTimeSlotLabelSnapshot = slotLabel
+          nextData.acceptDeliverySlot = true
+        } else {
+          if (hasPhoneInput && requestedPhone && !isPhoneValid(requestedPhone)) return fail('INVALID_PHONE', '请填写有效电话')
+          nextData.address = null
+          nextData.addressId = null
+          nextData.deliveryTimeSlotLabelSnapshot = null
+          nextData.acceptDeliverySlot = false
+        }
+
+        await db.collection('orders').doc(orderId).update({ data: nextData })
+        await db.collection('orderAuditLogs').add({
+          data: {
+            orderId,
+            action: 'ADMIN_UPDATE_FULFILLMENT',
+            byOpenId: openId,
+            at: db.serverDate(),
+            detail: {
+              from: String(order.fulfillmentType || ''),
+              to: fulfillmentType,
+              addressSource,
+              phoneChanged: nextData.contact.phone !== currentPhone,
+            },
+          },
+        })
+      } catch (err) {
+        return fail('TX_FAILED', 'Update fulfillment failed', String(err && err.message))
+      }
+      return ok({})
+    },
+
+    async updateOrderItems(event, ctx) {
+      const openId = ctx && ctx.openId
+      const { orderId } = event
+      const incomingItems = Array.isArray(event.items) ? event.items : []
+      if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
+      let txRes
+      try {
+        txRes = await db.runTransaction(async (tx) => {
+          let order
+          try {
+            const orderGet = await tx.collection('orders').doc(orderId).get()
+            order = orderGet.data
+          } catch (err) {
+            throwBiz('ORDER_NOT_FOUND', 'Order not found')
+          }
+          if (!order) throwBiz('ORDER_NOT_FOUND', 'Order not found')
+          if (order.status !== ORDER_STATUS.ACTIVE && order.status !== ORDER_STATUS.PENDING_REVIEW) {
+            throwBiz('ORDER_NOT_EDITABLE', 'Order is not editable')
+          }
+
+          const oldItems = Array.isArray(order.items) ? order.items : []
+          if (oldItems.length === 0) throwBiz('BAD_REQUEST', 'Order has no editable items')
+
+          const oldMap = new Map()
+          for (const it of oldItems) {
+            const dishId = String((it && it.dishId) || '').trim()
+            if (!dishId) continue
+            oldMap.set(dishId, it)
+          }
+          if (oldMap.size === 0) throwBiz('BAD_REQUEST', 'Order has no editable items')
+
+          const nextQtyMap = new Map()
+          for (const it of incomingItems) {
+            const dishId = String((it && it.dishId) || '').trim()
+            const qty = Number(it && it.qty)
+            if (!dishId || !Number.isFinite(qty) || qty < 0) throwBiz('BAD_REQUEST', 'Invalid items')
+            if (!oldMap.has(dishId)) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
+            nextQtyMap.set(dishId, Math.floor(qty))
+          }
+          for (const dishId of oldMap.keys()) {
+            if (!nextQtyMap.has(dishId)) nextQtyMap.set(dishId, 0)
+          }
+
+          const nextItems = []
+          let totalQty = 0
+          let totalAmountCents = 0
+          for (const [dishId, nextQty] of nextQtyMap.entries()) {
+            if (nextQty <= 0) continue
+            const old = oldMap.get(dishId)
+            const unitPriceCents = toSafeInt(old && old.unitPriceCents, 0)
+            const dishName = String((old && old.dishName) || '')
+            if (!dishName) throwBiz('BAD_REQUEST', 'Invalid order item')
+            const lineTotalCents = unitPriceCents * nextQty
+            totalQty += nextQty
+            totalAmountCents += lineTotalCents
+            nextItems.push({ dishId, dishName, unitPriceCents, qty: nextQty, lineTotalCents })
+          }
+          if (nextItems.length === 0) throwBiz('BAD_REQUEST', 'Order cannot be empty, cancel it instead')
+
+          const expandedLimits = []
+          let saleVersionSnapshot = toSafeInt(order.saleConfigVersionSnapshot, 0)
+          if (order.status === ORDER_STATUS.ACTIVE && order.saleId) {
+            const sale = await getSaleTx(tx, order.saleId)
+            if (sale && Array.isArray(sale.dishConfigs) && sale.dishConfigs.length > 0) {
+              const cfgMap = dishConfigMap(sale.dishConfigs)
+              for (const [dishId, nextQty] of nextQtyMap.entries()) {
+                const oldQty = toSafeInt(oldMap.get(dishId) && oldMap.get(dishId).qty, 0)
+                const delta = nextQty - oldQty
+                if (delta === 0) continue
+                const cfgItem = cfgMap.get(dishId)
+                if (!cfgItem) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed')
+                if (delta > 0) {
+                  const remain = Math.max(0, toSafeInt(cfgItem.limitQty, 0) - toSafeInt(cfgItem.soldQty, 0))
+                  if (delta > remain) {
+                    const grow = delta - remain
+                    cfgItem.limitQty = Math.max(0, toSafeInt(cfgItem.limitQty, 0) + grow)
+                    expandedLimits.push({
+                      dishId,
+                      increaseBy: grow,
+                      newLimitQty: cfgItem.limitQty,
+                    })
+                  }
+                }
+                cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) + delta)
+                cfgMap.set(dishId, cfgItem)
+              }
+              const nextConfigs = normalizeDishConfigs(sale.dishConfigs).map((x) => {
+                const cur = cfgMap.get(x.dishId)
+                return cur ? { dishId: x.dishId, limitQty: cur.limitQty, soldQty: cur.soldQty } : x
+              })
+              await tx.collection('sales').doc(order.saleId).update({
+                data: {
+                  updatedAt: db.serverDate(),
+                },
+              })
+              await replaceSaleItemsForSaleTx(tx, order.saleId, nextConfigs)
+            }
+            saleVersionSnapshot = toSafeInt(sale && sale.saleConfigVersion, saleVersionSnapshot)
+          }
+
+          const now = db.serverDate()
+          await tx.collection('orders').doc(orderId).update({
+            data: {
+              items: nextItems,
+              totals: { qty: totalQty, amountCents: totalAmountCents },
+              saleConfigVersionSnapshot: saleVersionSnapshot,
+              updatedAt: now,
+            },
+          })
+          await tx.collection('orderAuditLogs').add({
+            data: {
+              orderId,
+              action: order.status === ORDER_STATUS.ACTIVE ? 'ADMIN_UPDATE_ITEMS' : 'ADMIN_UPDATE_PENDING_ITEMS',
+              byOpenId: openId,
+              at: now,
+            },
+          })
+          return { totalQty, totalAmountCents, expandedLimits }
+        })
+      } catch (err) {
+        if (err && err.code) return fail(err.code, err.message || 'Request failed', err.detail)
+        return fail('TX_FAILED', 'Update order failed', String(err && err.message))
+      }
+      return ok(txRes || {})
+    },
+
+    async cancelOrder(event, ctx) {
+      const openId = ctx && ctx.openId
+      const { orderId } = event
+      if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
+      let txRes
+      try {
+        txRes = await db.runTransaction(async (tx) => {
+          let order = null
+          try {
+            const r = await tx.collection('orders').doc(orderId).get()
+            order = r.data
+          } catch (err) {
+            throw Object.assign(new Error('ORDER_NOT_FOUND'), { code: 'ORDER_NOT_FOUND' })
+          }
+          if (!order) throw Object.assign(new Error('ORDER_NOT_FOUND'), { code: 'ORDER_NOT_FOUND' })
+          if (order.status === ORDER_STATUS.CANCELLED || order.status === ORDER_STATUS.REJECTED) return { alreadyCancelled: true }
+
+          const now = db.serverDate()
+          await tx.collection('orders').doc(orderId).update({
+            data: { status: ORDER_STATUS.CANCELLED, cancelledAt: now, cancelledByOpenId: openId, updatedAt: now },
+          })
+
+          if (order.status === ORDER_STATUS.ACTIVE && order.saleId) {
+            const sale = await getSaleTx(tx, order.saleId)
+            if (sale && Array.isArray(sale.dishConfigs)) {
+              const cfgMap = dishConfigMap(sale.dishConfigs)
+              for (const it of order.items || []) {
+                const dishId = String((it && it.dishId) || '').trim()
+                const qty = toSafeInt(it && it.qty, 0)
+                if (!dishId || qty <= 0) continue
+                const cfgItem = cfgMap.get(dishId)
+                if (!cfgItem) continue
+                cfgItem.soldQty = Math.max(0, toSafeInt(cfgItem.soldQty, 0) - qty)
+                cfgMap.set(dishId, cfgItem)
+              }
+              const mergedConfigs = (sale.dishConfigs || []).map((it) => {
+                const cfgItem = cfgMap.get(it.dishId)
+                return cfgItem || it
+              })
+              await tx.collection('sales').doc(order.saleId).update({
+                data: { updatedAt: db.serverDate() },
+              })
+              await replaceSaleItemsForSaleTx(tx, order.saleId, mergedConfigs)
+            }
+          }
+          return { alreadyCancelled: false }
+        })
+      } catch (err) {
+        if (err && err.code === 'ORDER_NOT_FOUND') return fail('ORDER_NOT_FOUND', 'Order not found')
+        return fail('TX_FAILED', 'Cancel order failed', String(err && err.message))
+      }
+      if (txRes && txRes.alreadyCancelled) return ok({})
+      const now = db.serverDate()
+      await db.collection('orderAuditLogs').add({
+        data: { orderId, action: 'CANCEL', byOpenId: openId, at: now },
+      })
+      return ok({})
+    },
+  }
+}
+
+module.exports = {
+  createOrderWriteService,
+}

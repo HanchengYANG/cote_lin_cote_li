@@ -72,8 +72,7 @@ function mapReview(data) {
 
 createPage({
   data: {
-    initialLoading: true,
-    initialLoaded: false,
+    loadPhase: 'loading',
     saleOptions: [{ label: '加载中...', value: '' }],
     saleIndex: 0,
     saleLabel: '加载中...',
@@ -92,15 +91,16 @@ createPage({
   },
 
   async reload() {
-    const finishInitialLoad = () => {
-      if (this.data.initialLoading || !this.data.initialLoaded) {
-        this.setData({ initialLoading: false, initialLoaded: true })
+    const finishLoadPhase = () => {
+      if (this.data.loadPhase !== 'ready') {
+        this.setData({ loadPhase: 'ready' })
       }
     }
+    if (this.data.loadPhase !== 'ready') this.setData({ loadPhase: 'loading' })
 
     const salesRes = await call('admin', 'listSales', { limit: 50 })
     if (!salesRes.ok) {
-      finishInitialLoad()
+      finishLoadPhase()
       this.setData({
         saleOptions: [{ label: '加载失败', value: '' }],
         saleIndex: 0,
@@ -142,7 +142,7 @@ createPage({
       review: null,
       reviewLoaded: false,
     })
-    finishInitialLoad()
+    finishLoadPhase()
     await this.loadReview()
   },
 

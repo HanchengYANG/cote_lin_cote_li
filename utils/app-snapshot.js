@@ -1,6 +1,8 @@
 const { call } = require('./api')
 const { getSession } = require('./session')
 
+const SNAPSHOT_TTL_MS = 15 * 1000
+
 function getStore() {
   const app = typeof getApp === 'function' ? getApp() : null
   if (!app) {
@@ -63,12 +65,24 @@ function normalizePayload(raw) {
 
 function getSnapshot() {
   const store = getStore()
-  return store.valid ? store.payload : null
+  if (!store.valid || !store.payload) return null
+  if (!isPayloadFresh(store.payload)) {
+    store.valid = false
+    store.payload = null
+    return null
+  }
+  return store.payload
 }
 
 function isSnapshotValid() {
   const store = getStore()
-  return !!(store.valid && store.payload)
+  return !!(store.valid && store.payload && isPayloadFresh(store.payload))
+}
+
+function isPayloadFresh(payload) {
+  const updatedAt = Number(payload && payload.updatedAt)
+  if (!Number.isFinite(updatedAt) || updatedAt <= 0) return false
+  return Date.now() - updatedAt < SNAPSHOT_TTL_MS
 }
 
 function setSnapshot(input) {
@@ -88,7 +102,7 @@ async function ensureFresh(options = {}) {
   const force = !!options.force
   const includeAdmin = !!options.includeAdmin
   const store = getStore()
-  if (!force && store.valid && store.payload) return store.payload
+  if (!force && store.valid && store.payload && isPayloadFresh(store.payload)) return store.payload
 
   const [homeRes, sess] = await Promise.all([call('customer', 'bootstrapHome'), getSession()])
   if (!homeRes.ok || !homeRes.data) {

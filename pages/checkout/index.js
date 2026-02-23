@@ -5,16 +5,14 @@ const { normalizePhone, isPhoneValid } = require('../../utils/phone')
 const { getSnapshot, invalidateSnapshot } = require('../../utils/app-snapshot')
 const { createPage } = require('../../utils/create-page')
 
-const CHECKOUT_PROFILE_DIRTY_KEY = 'checkout_profile_dirty'
-
 const PAYMENT_METHODS = [
   { label: '现金', value: 'cash' },
   { label: '微信转账', value: 'wechat_transfer' },
-  { label: '到店付款', value: 'pickup_pay' },
 ]
 
 function findPaymentMethodIndex(value) {
-  const idx = PAYMENT_METHODS.findIndex((x) => x.value === value)
+  const normalized = String(value || '').trim()
+  const idx = PAYMENT_METHODS.findIndex((x) => x.value === normalized)
   return idx >= 0 ? idx : 0
 }
 
@@ -35,28 +33,94 @@ function normalizeCartItems(input) {
   return out
 }
 
-function parseCheckoutProfileDirty(raw) {
-  if (!raw) return null
-  if (typeof raw === 'object') {
-    if (raw && typeof raw.reason === 'string') return raw
-    return { reason: 'unknown' }
+function buildSelectedAddressView(data) {
+  const arr = Array.isArray(data && data.addresses) ? data.addresses : []
+  const currentId = String((data && data.selectedAddressId) || '').trim()
+  const idx = arr.findIndex((x) => String((x && x.id) || '').trim() === currentId)
+  const picked = idx >= 0 ? arr[idx] : null
+  return {
+    selectedAddressIndex: idx >= 0 ? idx : 0,
+    selectedAddressTitle: picked ? String(picked.title || '') : '',
+    selectedAddressDetail: picked ? String(picked.detail || '') : '',
+    selectedAddress: picked || null,
   }
-  const text = String(raw || '').trim()
-  if (!text) return null
-  if (text === '1') return { reason: 'unknown' }
-  try {
-    const parsed = JSON.parse(text)
-    if (parsed && typeof parsed === 'object' && typeof parsed.reason === 'string') return parsed
-  } catch (e) {
-    // ignore parse error, fallback to generic dirty refresh
+}
+
+function buildSubmitState(data, selectedAddr) {
+  let disabled = false
+  let reason = ''
+  if (data && data.submitting) {
+    disabled = true
+    reason = '提交中...'
   }
-  return { reason: 'unknown' }
+  if (!disabled && (!data || !Array.isArray(data.cartItems) || data.cartItems.length === 0)) {
+    disabled = true
+    reason = '当前购物车无可下单菜品'
+  }
+  if (!disabled && String((data && data.saleStatus) || '') !== 'open') {
+    disabled = true
+    reason = '当前未开单，暂不可提交订单'
+  }
+  if (!disabled && !!(data && data.existingOrderLocked)) {
+    disabled = true
+    reason = '该订单已由店主确认锁定，无法再修改'
+  }
+  const mergedTotalCents = Number((data && data.totalAmountCents) || 0) + Number((data && data.existingOrderAmountCents) || 0)
+  if (!disabled && String((data && data.fulfillmentType) || '') === 'delivery') {
+    if (!selectedAddr) {
+      disabled = true
+      reason = '请选择地址'
+    } else if (Number(selectedAddr.minOrderCents || 0) > 0 && mergedTotalCents < Number(selectedAddr.minOrderCents || 0)) {
+      disabled = true
+      reason = `未达到起送价 €${centToEuro(selectedAddr.minOrderCents || 0)}`
+    } else if (!(data && data.acceptDeliverySlot)) {
+      disabled = true
+      reason = '请勾选“我接受该时间段”'
+    }
+  }
+  if (!disabled && String((data && data.fulfillmentType) || '') === 'pickup' && !isPhoneValid(data && data.pickupPhone)) {
+    disabled = true
+    reason = '自取请填写有效电话'
+  }
+  return { submitDisabled: disabled, submitDisabledReason: reason }
+}
+
+function buildAddressRuleView(data, selectedAddr) {
+  if (String((data && data.fulfillmentType) || '') !== 'delivery' || !selectedAddr) {
+    return { minOrderText: '', minOrderHint: '', pendingReviewHint: false }
+  }
+  const minOrderCents = Number((selectedAddr && selectedAddr.minOrderCents) || 0)
+  if (minOrderCents > 0) {
+    return {
+      minOrderText: `该地址起送价：€${centToEuro(minOrderCents)}`,
+      minOrderHint: '',
+      pendingReviewHint: false,
+    }
+  }
+  return {
+    minOrderText: '',
+    minOrderHint: '该城市暂无起送价规则，提交后会变为“待店主确认”，且不会立即扣库存。',
+    pendingReviewHint: true,
+  }
+}
+
+function buildCheckoutViewModel(data) {
+  const selected = buildSelectedAddressView(data)
+  const idx = Number((data && data.paymentMethodIndex) || 0)
+  const safeIdx = idx >= 0 && idx < PAYMENT_METHODS.length ? idx : 0
+  return {
+    selectedAddressIndex: selected.selectedAddressIndex,
+    selectedAddressTitle: selected.selectedAddressTitle,
+    selectedAddressDetail: selected.selectedAddressDetail,
+    paymentMethodLabel: PAYMENT_METHODS[safeIdx].label,
+    ...buildAddressRuleView(data, selected.selectedAddress),
+    ...buildSubmitState(data, selected.selectedAddress),
+  }
 }
 
 createPage({
   data: {
-    initialLoading: true,
-    initialLoaded: false,
+    loadPhase: 'loading',
     refresherTriggered: false,
     saleStatus: 'closed',
     sale: null,
@@ -119,51 +183,19 @@ createPage({
       const lockedAddress = this.data.hasExistingOrder && this.data.fulfillmentType === 'delivery'
       if (!lockedAddress) {
         this.setData({ selectedAddressId: pickedAddressId })
-        this.syncSelectedAddressView()
-        this.recomputeAddressRuleHint()
-        this.recomputeSubmitDisabled()
+        this.applyCheckoutViewModel()
       }
     }
-    const dirty = this.consumeCheckoutProfileDirty()
-    if (dirty) {
-      this.applyProfileDirtyOptimistic(dirty)
+    if (this.shouldRefreshProfileOnShow()) {
       this.reload({ silent: true, skipSaleFetch: true })
     }
   },
 
-  consumeCheckoutProfileDirty() {
-    const raw = wx.getStorageSync(CHECKOUT_PROFILE_DIRTY_KEY)
-    if (!raw) return null
-    wx.removeStorageSync(CHECKOUT_PROFILE_DIRTY_KEY)
-    return parseCheckoutProfileDirty(raw)
-  },
-
-  applyProfileDirtyOptimistic(patch) {
-    if (!patch || patch.reason !== 'address_deleted') return
-    const deletedId = String(patch.addressId || '').trim()
-    if (!deletedId) return
-    const currentAddresses = Array.isArray(this.data.addresses) ? this.data.addresses : []
-    if (currentAddresses.length === 0) return
-    const nextAddresses = currentAddresses.filter((x) => String((x && x.id) || '').trim() !== deletedId)
-    if (nextAddresses.length === currentAddresses.length) return
-
-    const selectedAddressId = String(this.data.selectedAddressId || '').trim()
-    const selectedRemoved = selectedAddressId === deletedId
-    const nextData = { addresses: nextAddresses }
-    if (selectedRemoved) {
-      nextData.selectedAddressId = ''
-      nextData.selectedAddressIndex = 0
-      nextData.selectedAddressTitle = ''
-      nextData.selectedAddressDetail = ''
-      if (!this.data.hasExistingOrder && nextAddresses.length === 0) {
-        nextData.fulfillmentType = 'pickup'
-        nextData.acceptDeliverySlot = false
-      }
-    }
-    this.setData(nextData)
-    this.syncSelectedAddressView()
-    this.recomputeAddressRuleHint()
-    this.recomputeSubmitDisabled()
+  shouldRefreshProfileOnShow() {
+    const pages = getCurrentPages()
+    const prev = pages.length >= 2 ? pages[pages.length - 2] : null
+    const route = String((prev && prev.route) || '').trim()
+    return route === 'pages/address-book/index' || route === 'pages/address-edit/index'
   },
 
   hydrateFromSnapshot() {
@@ -190,7 +222,7 @@ createPage({
       dishesById,
     })
     this.recalcLines()
-    this.recomputeSubmitDisabled()
+    this.applyCheckoutViewModel()
     return true
   },
 
@@ -205,6 +237,10 @@ createPage({
     return (this.data.addresses || []).find((x) => x.id === id) || null
   },
 
+  applyCheckoutViewModel() {
+    this.setData(buildCheckoutViewModel(this.data))
+  },
+
   decorateAddress(a) {
     if (!a) return null
     const title = String(a.label || '').trim() || `${String(a.line1 || '').trim()} ${String(a.city || '').trim()}`.trim()
@@ -212,48 +248,15 @@ createPage({
     return { ...a, title, detail }
   },
 
-  syncSelectedAddressView() {
-    const arr = this.data.addresses || []
-    const currentId = String(this.data.selectedAddressId || '').trim()
-    const idx = arr.findIndex((x) => x.id === currentId)
-    const picked = idx >= 0 ? arr[idx] : null
-    this.setData({
-      selectedAddressIndex: idx >= 0 ? idx : 0,
-      selectedAddressTitle: picked ? picked.title : '',
-      selectedAddressDetail: picked ? picked.detail : '',
-    })
-  },
-
-  recomputeAddressRuleHint() {
-    const addr = this.getAddressById(this.data.selectedAddressId)
-    if (this.data.fulfillmentType !== 'delivery' || !addr) {
-      this.setData({ minOrderText: '', minOrderHint: '', pendingReviewHint: false })
-      return
-    }
-    const minOrderCents = Number(addr.minOrderCents || 0)
-    if (minOrderCents > 0) {
-      this.setData({
-        minOrderText: `该地址起送价：€${centToEuro(minOrderCents)}`,
-        minOrderHint: '',
-        pendingReviewHint: false,
-      })
-      return
-    }
-    this.setData({
-      minOrderText: '',
-      minOrderHint: '该城市暂无起送价规则，提交后会变为“待店主确认”，且不会立即扣库存。',
-      pendingReviewHint: true,
-    })
-  },
-
   async reload(options = {}) {
     const silent = !!options.silent
     const skipSaleFetch = !!options.skipSaleFetch
-    const finishInitialLoad = () => {
-      if (this.data.initialLoading || !this.data.initialLoaded) {
-        this.setData({ initialLoading: false, initialLoaded: true })
+    const finishLoadPhase = () => {
+      if (this.data.loadPhase !== 'ready') {
+        this.setData({ loadPhase: 'ready' })
       }
     }
+    if (this.data.loadPhase !== 'ready') this.setData({ loadPhase: 'loading' })
     if (!silent) {
       this.setData({ refresherTriggered: true })
     }
@@ -266,7 +269,7 @@ createPage({
     }
     const profileRes = await call('customer', 'getMyProfile')
     if (!profileRes || !profileRes.ok || !profileRes.data || !profileRes.data.profile) {
-      finishInitialLoad()
+      finishLoadPhase()
       if (!silent) this.setData({ refresherTriggered: false })
       wx.showToast({ title: '资料加载失败', icon: 'none' })
       return
@@ -330,11 +333,10 @@ createPage({
         selectedAddressId,
         pickupPhone,
       })
-      this.syncSelectedAddressView()
+      this.applyCheckoutViewModel()
       this.recalcLines()
-      this.recomputeAddressRuleHint()
-      this.recomputeSubmitDisabled()
-      finishInitialLoad()
+      this.applyCheckoutViewModel()
+      finishLoadPhase()
       if (!silent) this.setData({ refresherTriggered: false })
       return
     }
@@ -385,12 +387,11 @@ createPage({
     }
     next.pickupPhone = pickupPhone
     this.setData(next)
-    this.syncSelectedAddressView()
+    this.applyCheckoutViewModel()
     this.saveCart()
     this.recalcLines()
-    this.recomputeAddressRuleHint()
-    this.recomputeSubmitDisabled()
-    finishInitialLoad()
+    this.applyCheckoutViewModel()
+    finishLoadPhase()
     if (!silent) this.setData({ refresherTriggered: false })
   },
 
@@ -436,21 +437,20 @@ createPage({
       fulfillmentType: v,
       acceptDeliverySlot: v === 'delivery' ? this.data.acceptDeliverySlot : false,
     })
-    this.recomputeAddressRuleHint()
-    this.recomputeSubmitDisabled()
+    this.applyCheckoutViewModel()
   },
 
   onAcceptChange(e) {
     const arr = (e && e.detail && e.detail.value) || []
     const accept = Array.isArray(arr) ? arr.includes('accept') : false
     this.setData({ acceptDeliverySlot: accept })
-    this.recomputeSubmitDisabled()
+    this.applyCheckoutViewModel()
   },
 
   onPaymentMethodPick(e) {
     const idx = Number(e.detail.value || 0)
-    const label = (PAYMENT_METHODS[idx] && PAYMENT_METHODS[idx].label) || PAYMENT_METHODS[0].label
-    this.setData({ paymentMethodIndex: idx, paymentMethodLabel: label })
+    this.setData({ paymentMethodIndex: idx })
+    this.applyCheckoutViewModel()
   },
 
   onRemarkInput(e) {
@@ -460,7 +460,7 @@ createPage({
   onPickupPhoneInput(e) {
     const v = normalizePhone(e && e.detail && e.detail.value)
     this.setData({ pickupPhone: v })
-    this.recomputeSubmitDisabled()
+    this.applyCheckoutViewModel()
   },
 
   onAddressPick(e) {
@@ -473,9 +473,7 @@ createPage({
     const picked = arr[idx]
     if (!picked) return
     this.setData({ selectedAddressId: picked.id })
-    this.syncSelectedAddressView()
-    this.recomputeAddressRuleHint()
-    this.recomputeSubmitDisabled()
+    this.applyCheckoutViewModel()
   },
 
   goAddressBook() {
@@ -487,50 +485,10 @@ createPage({
     wx.navigateTo({ url: `/pages/address-book/index?select=1&selectedAddressId=${encodeURIComponent(selectedAddressId)}` })
   },
 
-  recomputeSubmitDisabled() {
-    let disabled = false
-    let reason = ''
-    if (this.data.submitting) {
-      disabled = true
-      reason = '提交中...'
-    }
-    if (!disabled && (!this.data.cartItems || this.data.cartItems.length === 0)) {
-      disabled = true
-      reason = '当前购物车无可下单菜品'
-    }
-    if (!disabled && this.data.saleStatus !== 'open') {
-      disabled = true
-      reason = '当前未开单，暂不可提交订单'
-    }
-    if (!disabled && this.data.existingOrderLocked) {
-      disabled = true
-      reason = '该订单已由店主确认锁定，无法再修改'
-    }
-    const addr = this.getAddressById(this.data.selectedAddressId)
-    const mergedTotalCents = Number(this.data.totalAmountCents || 0) + Number(this.data.existingOrderAmountCents || 0)
-    if (!disabled && this.data.fulfillmentType === 'delivery') {
-      if (!addr) {
-        disabled = true
-        reason = '请选择地址'
-      } else if (Number(addr.minOrderCents || 0) > 0 && mergedTotalCents < Number(addr.minOrderCents || 0)) {
-        disabled = true
-        reason = `未达到起送价 €${centToEuro(addr.minOrderCents || 0)}`
-      } else if (!this.data.acceptDeliverySlot) {
-        disabled = true
-        reason = '请勾选“我接受该时间段”'
-      }
-    }
-    if (!disabled && this.data.fulfillmentType === 'pickup' && !isPhoneValid(this.data.pickupPhone)) {
-      disabled = true
-      reason = '自取请填写有效电话'
-    }
-    this.setData({ submitDisabled: disabled, submitDisabledReason: reason })
-  },
-
   async submit() {
     if (this.data.submitDisabled || this.data.submitting) return
     this.setData({ submitting: true })
-    this.recomputeSubmitDisabled()
+    this.applyCheckoutViewModel()
     const paymentMethod = PAYMENT_METHODS[this.data.paymentMethodIndex].value
     const lockedType = String(this.data.existingOrderFulfillmentType || '').trim()
     const effectiveType = this.data.hasExistingOrder && lockedType ? lockedType : this.data.fulfillmentType
@@ -553,7 +511,7 @@ createPage({
     }
     const res = await call('customer', 'createOrder', payload)
     this.setData({ submitting: false })
-    this.recomputeSubmitDisabled()
+    this.applyCheckoutViewModel()
     if (!res.ok) {
       invalidateSnapshot()
       if (res.code === 'OUT_OF_STOCK') {
