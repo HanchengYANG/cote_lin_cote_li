@@ -27,7 +27,10 @@
   <view class="card">
     <view class="row">
       <view class="title">菜品</view>
-      <view class="muted small" wx:if="{{canEditItems}}">可编辑</view>
+      <view class="row-actions">
+        <view class="muted small" wx:if="{{canEditItems}}">可编辑</view>
+        <view class="mini-btn" wx:if="{{canEditItems && canAddItems}}" bindtap="onAddItemTap">新增菜品</view>
+      </view>
     </view>
     <view class="line edit-line" wx:for="{{editableItems}}" wx:key="dishId">
       <view class="line-main">

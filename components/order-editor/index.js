@@ -20,6 +20,10 @@ Component({
       type: Boolean,
       value: false,
     },
+    canAddItems: {
+      type: Boolean,
+      value: false,
+    },
     saving: {
       type: Boolean,
       value: false,
@@ -66,6 +70,10 @@ Component({
       const dishId = String((e.currentTarget.dataset && e.currentTarget.dataset.id) || '').trim()
       if (!dishId) return
       this.triggerEvent('removeitem', { dishId })
+    },
+
+    onAddItemTap() {
+      this.triggerEvent('additem')
     },
 
     onSaveTap() {

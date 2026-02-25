@@ -2,24 +2,10 @@ const { call } = require('../../utils/api')
 const { invalidateSnapshot } = require('../../utils/app-snapshot')
 const { createPage } = require('../../utils/create-page')
 
-const CHECKOUT_PROFILE_DIRTY_KEY = 'checkout_profile_dirty'
-
-function setCheckoutProfileDirty(payload) {
-  try {
-    wx.setStorageSync(CHECKOUT_PROFILE_DIRTY_KEY, JSON.stringify({
-      ...(payload || {}),
-      ts: Date.now(),
-    }))
-  } catch (e) {
-    wx.setStorageSync(CHECKOUT_PROFILE_DIRTY_KEY, '1')
-  }
-}
-
 createPage({
   data: {
     loading: false,
-    initialLoading: true,
-    initialLoaded: false,
+    loadPhase: 'loading',
     selectMode: false,
     selectedAddressId: '',
     profile: null,
@@ -39,14 +25,15 @@ createPage({
 
   async reload() {
     this.setData({ loading: true })
-    const finishInitialLoad = () => {
-      if (this.data.initialLoading || !this.data.initialLoaded) {
-        this.setData({ initialLoading: false, initialLoaded: true })
+    const finishLoadPhase = () => {
+      if (this.data.loadPhase !== 'ready') {
+        this.setData({ loadPhase: 'ready' })
       }
     }
+    if (this.data.loadPhase !== 'ready') this.setData({ loadPhase: 'loading' })
     const res = await call('customer', 'getMyProfile')
     this.setData({ loading: false })
-    finishInitialLoad()
+    finishLoadPhase()
     if (!res.ok || !res.data || !res.data.profile) {
       wx.showToast({ title: res.message || '加载失败', icon: 'none' })
       return
@@ -91,7 +78,6 @@ createPage({
       return
     }
     invalidateSnapshot()
-    setCheckoutProfileDirty({ reason: 'address_default_changed', addressId: id })
     wx.showToast({ title: '已设为默认', icon: 'success' })
     await this.reload()
   },
@@ -115,7 +101,6 @@ createPage({
       return
     }
     invalidateSnapshot()
-    setCheckoutProfileDirty({ reason: 'address_deleted', addressId: id })
     wx.showToast({ title: '已删除', icon: 'success' })
     await this.reload()
   },

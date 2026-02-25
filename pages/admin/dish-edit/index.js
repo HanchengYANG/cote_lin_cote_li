@@ -35,8 +35,7 @@ function chooseImages(remain) {
 createPage({
   data: {
     dishId: '',
-    initialLoading: false,
-    initialLoaded: false,
+    loadPhase: 'ready',
     name: '',
     priceEuro: '',
     isActive: true,
@@ -52,12 +51,11 @@ createPage({
     const dishId = (query && query.dishId) || ''
     this.setData({
       dishId,
-      initialLoading: !!dishId,
-      initialLoaded: !dishId,
+      loadPhase: dishId ? 'loading' : 'ready',
     })
     if (!dishId) return
     const res = await call('admin', 'getDish', { dishId })
-    this.setData({ initialLoading: false, initialLoaded: true })
+    this.setData({ loadPhase: 'ready' })
     if (!res.ok) {
       wx.showToast({ title: res.message || '加载失败', icon: 'none' })
       return
@@ -108,7 +106,7 @@ createPage({
     } catch (e) {
       // ignore
     }
-    wx.showToast({ title: '打开相册/相机...', icon: 'none', duration: 800 })
+    wx.showToast({ title: '打开相册/相机...', icon: 'none', duration: 800, __forceToast: true })
 
     let chooseRes = null
     this.setData({ choosing: true })

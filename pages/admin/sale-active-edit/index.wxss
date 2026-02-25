@@ -35,6 +35,15 @@ page {
   padding: 18rpx 16rpx;
   margin-top: 12rpx;
 }
+.picker.compact {
+  margin-top: 0;
+  padding: 14rpx 14rpx;
+  width: 100%;
+  min-height: 76rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+}
 .textarea {
   min-height: 140rpx;
   border: 1rpx solid rgba(0, 0, 0, 0.12);
@@ -70,6 +79,25 @@ page {
   width: auto;
   margin-top: 12rpx;
 }
+.add-dish-row {
+  display: flex;
+  align-items: stretch;
+  margin-top: 12rpx;
+}
+.add-dish-picker-wrap {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.qty-input.add-dish-qty {
+  width: 160rpx;
+  min-width: 160rpx;
+  margin-left: 12rpx;
+  box-sizing: border-box;
+  min-height: 76rpx;
+  padding: 0 12rpx;
+  line-height: 76rpx;
+  text-align: center;
+}
 .mini-btn.ghost {
   background: transparent;
   color: #111;
@@ -83,6 +111,10 @@ page {
   line-height: 88rpx;
   margin-top: 14rpx;
 }
+.btn.block {
+  width: 100%;
+  box-sizing: border-box;
+}
 .btn.ghost {
   background: transparent;
   color: #111;
@@ -91,4 +123,3 @@ page {
 .btn[disabled] {
   opacity: 0.4;
 }
-

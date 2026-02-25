@@ -16,8 +16,7 @@ createPage({
     sale: null,
     dishes: [],
     loading: false,
-    initialLoading: true,
-    initialLoaded: false,
+    loadPhase: 'loading',
     slotDate: '',
     slotStart: '',
     slotEnd: '',
@@ -36,14 +35,15 @@ createPage({
 
   async reload() {
     this.setData({ loading: true })
-    const finishInitialLoad = () => {
-      if (this.data.initialLoading || !this.data.initialLoaded) {
-        this.setData({ initialLoading: false, initialLoaded: true })
+    const finishLoadPhase = () => {
+      if (this.data.loadPhase !== 'ready') {
+        this.setData({ loadPhase: 'ready' })
       }
     }
+    if (this.data.loadPhase !== 'ready') this.setData({ loadPhase: 'loading' })
     const res = await call('admin', 'getActiveSaleEditor')
     this.setData({ loading: false })
-    finishInitialLoad()
+    finishLoadPhase()
     if (!res.ok) {
       wx.showToast({ title: res.message || '加载失败', icon: 'none' })
       return
@@ -231,6 +231,8 @@ createPage({
     }
     invalidateSnapshot()
     wx.showToast({ title: '已保存', icon: 'success' })
-    await this.reload()
+    setTimeout(() => {
+      wx.navigateBack()
+    }, 180)
   },
 })

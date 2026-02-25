@@ -9,7 +9,7 @@
       </picker>
     </view>
 
-    <view class="card" wx:if="{{initialLoading}}">
+    <view class="card" wx:if="{{loadPhase!=='ready'}}">
       <view class="muted">载入中...</view>
     </view>
     <view class="card" wx:elif="{{orders.length===0 && !loading}}">

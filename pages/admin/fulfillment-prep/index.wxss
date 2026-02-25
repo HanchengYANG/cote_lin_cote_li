@@ -174,6 +174,15 @@ page {
   font-size: 22rpx;
 }
 
+.mini.icon {
+  min-width: 64rpx;
+  width: 64rpx;
+  height: 60rpx;
+  line-height: 60rpx;
+  padding: 0;
+  font-size: 28rpx;
+}
+
 .mini::after {
   border: none;
 }
@@ -202,6 +211,23 @@ page {
   background: #f8fafc;
   color: #111827;
   border: 1rpx solid rgba(15, 23, 42, 0.1);
+}
+
+.btn.primary {
+  background: linear-gradient(135deg, #111827 0%, #1f2937 100%);
+  color: #fff;
+  box-shadow: 0 12rpx 24rpx rgba(17, 24, 39, 0.14);
+}
+
+.page-actions {
+  margin-top: 4rpx;
+  padding-bottom: 8rpx;
+}
+
+.page-actions .btn {
+  width: 100%;
+  margin-top: 0;
+  display: block;
 }
 
 button[disabled] {

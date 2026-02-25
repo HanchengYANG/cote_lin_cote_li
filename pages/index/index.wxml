@@ -5,10 +5,28 @@
 <scroll-view class="scrollarea" scroll-y type="list" refresher-enabled="{{true}}" refresher-triggered="{{refresherTriggered}}" bindrefresherrefresh="onPullDownRefresh">
   <view class="page">
     <view class="info-strip">
-      <text wx:if="{{isHydrating}}" class="muted">菜单加载中...</text>
-      <text wx:elif="{{saleInfo.status!=='OPEN'}}" class="muted">当前未开单，可先加购物车，开单后再提交订单。</text>
-      <text wx:elif="{{saleInfo.deliveryTimeSlotLabel}}" class="muted">本次配送时间：{{saleInfo.deliveryTimeSlotLabel}}</text>
-      <text wx:else class="muted">当前开单中</text>
+      <view class="info-main">
+        <text wx:if="{{isHydrating}}" class="muted">菜单加载中...</text>
+        <text wx:elif="{{saleInfo.status!=='OPEN' && !customerOrderProgressText}}" class="muted">当前未开单，可先加购物车，开单后再提交订单。</text>
+        <text wx:elif="{{saleInfo.status==='OPEN' && !customerOrderProgressText}}" class="muted">当前开单中</text>
+        <view wx:if="{{shouldShowDeliverySlot}}" class="info-subline">
+          <text class="muted">本次配送时间：{{saleInfo.deliveryTimeSlotLabel}}</text>
+        </view>
+        <view wx:if="{{customerOrderProgressText}}" class="info-subline info-progress-line">
+          <text class="muted">{{customerOrderProgressText}}</text>
+        </view>
+      </view>
+      <view wx:if="{{saleInfo.note}}" class="notice-inline">
+        <view class="notice-divider"></view>
+        <view class="notice-head">
+          <view class="notice-title">本次说明</view>
+          <view wx:if="{{noticeCanToggle}}" class="notice-toggle" bindtap="toggleNoticeCollapsed">{{noticeCollapsed ? '展开' : '收起'}}</view>
+        </view>
+        <view wx:if="{{noticeCollapsed}}" class="notice-text collapsed">{{noticePreviewText}}</view>
+        <view wx:else class="notice-text expanded">
+          <view wx:for="{{noticeLines}}" wx:key="index" class="notice-line">{{item || ' '}}</view>
+        </view>
+      </view>
     </view>
 
     <view class="error-strip" wx:if="{{lastErrorMsg}}">
@@ -55,3 +73,26 @@
     </view>
   </view>
 </scroll-view>
+
+<view wx:if="{{showNicknamePopup}}" class="nickname-popup-mask" catchtouchmove="noop" catchtap="noop">
+  <view class="nickname-popup-card" catchtap="noop">
+    <view class="nickname-popup-title">先填个昵称</view>
+    <view class="nickname-popup-desc">首次使用仅需填写昵称，之后可在“我的”页面修改。</view>
+    <input
+      class="nickname-popup-input"
+      type="nickname"
+      placeholder="请输入昵称"
+      value="{{nicknameDraft}}"
+      bindinput="onNicknamePopupInput"
+      maxlength="40"
+      focus="{{showNicknamePopup}}"
+    />
+    <view wx:if="{{nicknamePopupError}}" class="nickname-popup-error">{{nicknamePopupError}}</view>
+    <button
+      class="btn nickname-popup-save"
+      loading="{{nicknameSaving}}"
+      disabled="{{nicknameSaving || !nicknameDraft}}"
+      bindtap="saveNicknameFromPopup"
+    >保存昵称</button>
+  </view>
+</view>

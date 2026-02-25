@@ -2,10 +2,10 @@
 <sync-guard ready="{{isReady}}" error="{{syncError}}" bindretry="onSyncRetry"></sync-guard>
 <scroll-view class="scrollarea" scroll-y type="list">
   <view class="page">
-    <view class="card" wx:if="{{initialLoading}}">
+    <view class="card" wx:if="{{loadPhase!=='ready'}}">
       <view class="muted">载入中...</view>
     </view>
-    <view class="card" wx:elif="{{initialLoaded && addresses.length===0}}">
+    <view class="card" wx:elif="{{loadPhase==='ready' && addresses.length===0}}">
       <view class="muted">还没有地址，先新增一个吧。</view>
     </view>
     <block wx:else>
@@ -25,6 +25,6 @@
       </view>
     </block>
 
-    <button class="btn" wx:if="{{!initialLoading}}" bindtap="goAdd">新增地址</button>
+    <button class="btn" wx:if="{{loadPhase==='ready'}}" bindtap="goAdd">新增地址</button>
   </view>
 </scroll-view>

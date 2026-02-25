@@ -2,7 +2,7 @@
 <sync-guard ready="{{isReady}}" error="{{syncError}}" bindretry="onSyncRetry"></sync-guard>
 <scroll-view class="scrollarea" scroll-y type="list">
   <view class="page">
-    <view class="card" wx:if="{{initialLoading}}">
+    <view class="card" wx:if="{{loadPhase!=='ready'}}">
       <view class="muted">载入中...</view>
     </view>
 
@@ -24,44 +24,43 @@
           <view class="title">生产进度</view>
           <view class="muted small">开单状态：{{sale.statusText || sale.status}}</view>
           <view class="muted small" wx:if="{{sale.deliveryTimeSlotLabel}}">时间段：{{sale.deliveryTimeSlotLabel}}</view>
+          <view class="muted small warn" wx:if="{{productionDirty}}">当前有未保存修改</view>
           <view class="progress-head">
-            <view class="progress-percent">{{production.completionPercent || 0}}%</view>
-            <view class="muted small">已生产 {{production.totalPreparedQty || 0}} / {{production.totalNeedQty || 0}}</view>
+            <view class="progress-percent">{{productionDraft.completionPercent || 0}}%</view>
+            <view class="muted small">已生产 {{productionDraft.totalPreparedQty || 0}} / {{productionDraft.totalNeedQty || 0}}</view>
           </view>
           <view class="progress-track">
-            <view class="progress-bar" style="width: {{production.completionPercent || 0}}%;"></view>
+            <view class="progress-bar" style="width: {{productionDraft.completionPercent || 0}}%;"></view>
           </view>
           <view class="muted small warn" wx:if="{{!canEdit}}">仅 CLOSED 状态可编辑生产进度</view>
         </view>
 
-        <view class="card" wx:if="{{loadingBoard}}">
-          <view class="muted">加载生产清单中...</view>
-        </view>
-
-        <view class="card" wx:elif="{{production.items.length===0}}">
+        <view class="card">
           <view class="title">菜品清单</view>
-          <view class="muted">暂无菜品生产数据</view>
-        </view>
-
-        <view class="card" wx:else>
-          <view class="title">菜品清单</view>
-          <view class="row-item" wx:for="{{production.items}}" wx:key="dishId">
-            <view class="row-main">
-              <view class="dish-name">{{item.dishName}}</view>
-              <view class="muted small">需做 {{item.needQty}} 份</view>
-              <view class="muted small" wx:if="{{item.isOver}}">已超量生产</view>
-            </view>
-            <view class="row-side">
-              <view class="prepared {{item.isDone ? 'done' : ''}}">{{item.preparedQty}} / {{item.needQty}}</view>
-              <view class="ops" wx:if="{{canEdit}}">
-                <button class="icon-btn" size="mini" catchtap="onAdjustPrepared" data-id="{{item.dishId}}" data-delta="-1" disabled="{{operatingDishId || item.preparedQty<=0}}">-</button>
-                <button class="icon-btn plus" size="mini" catchtap="onAdjustPrepared" data-id="{{item.dishId}}" data-delta="1" disabled="{{operatingDishId}}">+</button>
+          <view class="muted" wx:if="{{loadingBoard}}">加载生产清单中...</view>
+          <view class="muted" wx:elif="{{productionDraft.items.length===0}}">暂无菜品生产数据</view>
+          <block wx:else>
+            <view class="row-item" wx:for="{{productionDraft.items}}" wx:key="dishId">
+              <view class="row-main">
+                <view class="dish-name">{{item.dishName}}</view>
+                <view class="muted small">需做 {{item.needQty}} 份</view>
+                <view class="muted small" wx:if="{{item.isOver}}">已超量生产</view>
+              </view>
+              <view class="row-side">
+                <view class="prepared {{item.isDone ? 'done' : ''}}">{{item.preparedQty}} / {{item.needQty}}</view>
+                <view class="ops" wx:if="{{canEdit}}">
+                  <button class="icon-btn" size="mini" catchtap="onAdjustPrepared" data-id="{{item.dishId}}" data-delta="-1" disabled="{{loadingBoard || savingBoard || completingAll || item.preparedQty<=0}}">-</button>
+                  <button class="icon-btn plus" size="mini" catchtap="onAdjustPrepared" data-id="{{item.dishId}}" data-delta="1" disabled="{{loadingBoard || savingBoard || completingAll}}">+</button>
+                </view>
               </view>
             </view>
+          </block>
+          <view class="actions" wx:if="{{canEdit}}">
+            <button class="action-btn save" loading="{{savingBoard}}" disabled="{{loadingBoard || savingBoard || completingAll || !productionDirty}}" bindtap="onSaveProductionBoard">💾 保存进度</button>
+            <button class="action-btn complete" loading="{{completingAll}}" disabled="{{loadingBoard || savingBoard || completingAll || !productionDraft.items.length}}" bindtap="onCompleteAllPrepared">✅ 一键完成</button>
           </view>
         </view>
       </block>
     </block>
   </view>
 </scroll-view>
-

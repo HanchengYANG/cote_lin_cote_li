@@ -11,7 +11,7 @@
     <block wx:elif="{{!isAdmin}}">
       <view class="card">
         <view class="muted">无权限</view>
-        <view class="muted small">请把你的 openid 加入云数据库 `adminConfig/main.adminOpenIds`</view>
+        <view class="muted small">请把你的 openid 加入云数据库 `system_admins/main.adminOpenIds`</view>
         <view class="muted small">我的 openid：{{myOpenId}}</view>
         <button class="btn ghost mini-btn" size="mini" bindtap="copyOpenId">复制 openid</button>
       </view>
@@ -25,16 +25,25 @@
         </view>
         <view wx:elif="{{activeSale}}">
           <view class="sale-summary">
-            <view class="summary-item">
-              <view class="summary-label">状态</view>
+            <view class="summary-item surface-tile">
+              <view class="summary-label-row">
+                <text class="summary-emoji">📌</text>
+                <text class="summary-label">状态</text>
+              </view>
               <view class="summary-value">{{activeSale.statusText || activeSale.status}}</view>
             </view>
-            <view class="summary-item">
-              <view class="summary-label">订单数</view>
+            <view class="summary-item surface-tile">
+              <view class="summary-label-row">
+                <text class="summary-emoji">🧾</text>
+                <text class="summary-label">订单数</text>
+              </view>
               <view class="summary-value">{{stats.orderCount}}</view>
             </view>
-            <view class="summary-item">
-              <view class="summary-label">销售额</view>
+            <view class="summary-item summary-item-full surface-tile">
+              <view class="summary-label-row">
+                <text class="summary-emoji">💶</text>
+                <text class="summary-label">销售额</text>
+              </view>
               <view class="summary-value">€{{activeSaleRevenueEuro}}</view>
             </view>
           </view>
@@ -155,58 +164,62 @@
       <view class="card">
         <view class="title">当前操作</view>
         <view class="quick-grid">
+            <view class="quick-item surface-tile pending" wx:if="{{pendingReviewCount>0}}" hover-class="quick-item-hover" bindtap="goPendingOrders">
+            <text class="quick-icon">🟠</text>
+            <text class="quick-label">待确认订单（{{pendingReviewCount}}）</text>
+          </view>
           <block wx:if="{{!saleKnown}}">
-            <view class="quick-item disabled">
+            <view class="quick-item surface-tile disabled">
               <text class="quick-icon">⏳</text>
               <text class="quick-label">状态同步中</text>
             </view>
           </block>
           <block wx:elif="{{!activeSale}}">
-            <view class="quick-item" hover-class="quick-item-hover" bindtap="goSaleDraft">
+            <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="goSaleDraft">
               <text class="quick-icon">📝</text>
               <text class="quick-label">创建/编辑开单</text>
             </view>
           </block>
           <block wx:elif="{{activeSale.status==='OPEN'}}">
-            <view class="quick-item" hover-class="quick-item-hover" bindtap="goActiveSaleEdit">
+            <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="goActiveSaleEdit">
               <text class="quick-icon">✏️</text>
               <text class="quick-label">编辑开单</text>
             </view>
-            <view class="quick-item danger" hover-class="quick-item-hover" bindtap="closeSale">
+            <view class="quick-item surface-tile danger" hover-class="quick-item-hover" bindtap="closeSale">
               <text class="quick-icon">⛔</text>
               <text class="quick-label">截单</text>
             </view>
           </block>
           <block wx:elif="{{activeSale.status==='CLOSED'}}">
-            <view class="quick-item" hover-class="quick-item-hover" bindtap="goProduction">
+            <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="goProduction">
               <text class="quick-icon">🍳</text>
               <text class="quick-label">生产管理</text>
             </view>
-            <view class="quick-item" hover-class="quick-item-hover" bindtap="goFulfillmentPrep">
+            <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="goFulfillmentPrep">
               <text class="quick-icon">🗂️</text>
               <text class="quick-label">交付准备</text>
             </view>
           </block>
           <block wx:elif="{{activeSale.status==='FULFILLING'}}">
-            <view class="quick-item primary {{(completingActiveSale || !canCompleteActiveSale) ? 'disabled' : ''}}" hover-class="quick-item-hover" bindtap="completeActiveSale">
+            <view class="quick-item surface-tile primary {{(completingActiveSale || !canCompleteActiveSale) ? 'disabled' : ''}}" hover-class="quick-item-hover" bindtap="completeActiveSale">
               <text class="quick-icon">✅</text>
               <text class="quick-label">完成本次开单</text>
             </view>
-            <view class="quick-item" hover-class="quick-item-hover" bindtap="goFulfillmentRun">
+            <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="goFulfillmentRun">
               <text class="quick-icon">🛵</text>
               <text class="quick-label">配送执行</text>
             </view>
-            <view class="quick-item" hover-class="quick-item-hover" bindtap="goPickupRun">
+            <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="goPickupRun">
               <text class="quick-icon">🧾</text>
               <text class="quick-label">自取执行</text>
             </view>
-            <view class="quick-item" hover-class="quick-item-hover" bindtap="goFulfillmentPrep">
+            <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="goFulfillmentPrep">
               <text class="quick-icon">🗂️</text>
               <text class="quick-label">交付准备</text>
             </view>
           </block>
           <block wx:else>
-            <view class="quick-item" hover-class="quick-item-hover" bindtap="goSaleDraft">
+            <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="goSaleDraft">
               <text class="quick-icon">📝</text>
               <text class="quick-label">创建/编辑开单</text>
             </view>
@@ -217,27 +230,27 @@
       <view class="card">
         <view class="title">店铺管理</view>
         <view class="quick-grid">
-          <view class="quick-item" hover-class="quick-item-hover" bindtap="goDishes">
+          <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="goDishes">
             <text class="quick-icon">🍽️</text>
             <text class="quick-label">菜品库</text>
           </view>
-          <view class="quick-item" hover-class="quick-item-hover" bindtap="goOrders">
+          <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="goOrders">
             <text class="quick-icon">📦</text>
             <text class="quick-label">订单管理</text>
           </view>
-          <view class="quick-item" hover-class="quick-item-hover" bindtap="goCustomers">
+          <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="goCustomers">
             <text class="quick-icon">👥</text>
             <text class="quick-label">客人管理</text>
           </view>
-          <view class="quick-item" hover-class="quick-item-hover" bindtap="goSaleReview">
+          <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="goSaleReview">
             <text class="quick-icon">📈</text>
             <text class="quick-label">开单复盘</text>
           </view>
-          <view class="quick-item" hover-class="quick-item-hover" bindtap="goDeliveryRules">
+          <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="goDeliveryRules">
             <text class="quick-icon">🚚</text>
             <text class="quick-label">起送价规则</text>
           </view>
-          <view class="quick-item" hover-class="quick-item-hover" bindtap="debugForceSetSaleStatus">
+          <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="debugForceSetSaleStatus">
             <text class="quick-icon">🛠️</text>
             <text class="quick-label">改开单状态</text>
           </view>

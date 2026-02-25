@@ -44,8 +44,7 @@ createPage({
     defaultMinEuro: '',
     saving: false,
     loading: false,
-    initialLoading: true,
-    initialLoaded: false,
+    loadPhase: 'loading',
     citySuggestRowId: '',
     citySuggestions: [],
     cityFocusRowId: '',
@@ -54,24 +53,27 @@ createPage({
   onShow() {
     this._citySuggestReqId = 0
     this._isPickingCitySuggestion = false
+    this._ignoreNextCityInput = null
     this.reload()
   },
 
   onUnload() {
     if (this._citySuggestTimer) clearTimeout(this._citySuggestTimer)
     this._isPickingCitySuggestion = false
+    this._ignoreNextCityInput = null
   },
 
   async reload() {
     this.setData({ loading: true })
-    const finishInitialLoad = () => {
-      if (this.data.initialLoading || !this.data.initialLoaded) {
-        this.setData({ initialLoading: false, initialLoaded: true })
+    const finishLoadPhase = () => {
+      if (this.data.loadPhase !== 'ready') {
+        this.setData({ loadPhase: 'ready' })
       }
     }
+    if (this.data.loadPhase !== 'ready') this.setData({ loadPhase: 'loading' })
     const res = await call('admin', 'getDeliveryRules')
     this.setData({ loading: false })
-    finishInitialLoad()
+    finishLoadPhase()
     if (!res.ok) {
       wx.showToast({ title: res.message || '加载失败', icon: 'none' })
       return
@@ -95,6 +97,13 @@ createPage({
     const val = String((e.detail && e.detail.value) || '')
     const rows = normalizeRows(this.data.rows)
     if (!rows[idx]) return
+    const rowId = rows[idx]._rid
+    const ignore = this._ignoreNextCityInput
+    if (ignore && ignore.rowId === rowId) {
+      // iOS 会在选择下拉建议后回放一次旧的 input 事件；仅忽略这一次旧值回放
+      this._ignoreNextCityInput = null
+      if (String(val) === String(ignore.value || '')) return
+    }
     rows[idx].city = val
     this.setData({ rows })
     this.debouncedSuggestCity(rows[idx]._rid, val)
@@ -105,6 +114,7 @@ createPage({
     const rows = normalizeRows(this.data.rows)
     const row = rows[idx]
     if (!row) return
+    this._ignoreNextCityInput = null
     this.setData({ cityFocusRowId: row._rid })
     this.debouncedSuggestCity(row._rid, row.city)
   },
@@ -176,7 +186,12 @@ createPage({
       this._isPickingCitySuggestion = false
       return
     }
+    const previousValue = String(rows[idx].city || '')
     rows[idx].city = city
+    this._ignoreNextCityInput = {
+      rowId,
+      value: previousValue,
+    }
     this.setData({
       rows,
       citySuggestRowId: '',

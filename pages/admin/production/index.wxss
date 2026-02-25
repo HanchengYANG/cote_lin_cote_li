@@ -125,6 +125,42 @@ page {
   gap: 8rpx;
 }
 
+.actions {
+  margin-top: 14rpx;
+  display: flex;
+  flex-direction: row;
+  gap: 12rpx;
+}
+
+.action-btn {
+  flex: 1;
+  width: auto;
+  height: 82rpx;
+  line-height: 82rpx;
+  border-radius: 16rpx;
+  font-size: 28rpx;
+  font-weight: 700;
+  letter-spacing: 0.5rpx;
+}
+
+.action-btn::after {
+  border-radius: 16rpx;
+}
+
+.action-btn.save {
+  color: #0f172a;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1rpx solid rgba(15, 23, 42, 0.12);
+  box-shadow: 0 6rpx 16rpx rgba(15, 23, 42, 0.06);
+}
+
+.action-btn.complete {
+  color: #fff;
+  background: linear-gradient(135deg, #111827 0%, #1f2937 100%);
+  border: 1rpx solid #111827;
+  box-shadow: 0 10rpx 20rpx rgba(17, 24, 39, 0.18);
+}
+
 .icon-btn {
   min-width: 56rpx;
   width: 56rpx;
@@ -151,4 +187,3 @@ page {
 button[disabled] {
   opacity: 0.45;
 }
-

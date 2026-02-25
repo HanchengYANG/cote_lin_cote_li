@@ -1,0 +1,37 @@
+<navigation-bar title="待确认订单" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<sync-guard ready="{{isReady}}" error="{{syncError}}" bindretry="onSyncRetry"></sync-guard>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="page">
+    <view class="card" wx:if="{{loadPhase!=='ready'}}">
+      <view class="muted">载入中...</view>
+    </view>
+    <view class="card" wx:elif="{{orders.length===0 && !loading}}">
+      <view class="title">待确认订单</view>
+      <view class="muted">暂无待确认订单</view>
+    </view>
+
+    <block wx:else>
+      <view class="card">
+        <view class="title">待确认订单（{{orders.length}}）</view>
+        <view class="muted small">点击订单进入详情后可确认或拒绝。</view>
+      </view>
+
+      <view class="list">
+        <view class="item" wx:for="{{orders}}" wx:key="_id" bindtap="goDetail" data-id="{{item._id}}">
+          <view class="top">
+            <view class="tag {{item.statusClass}}">{{item.statusText}}</view>
+            <view class="muted small">{{item.createdAtText}}</view>
+          </view>
+          <view class="mid">
+            <view class="strong">{{item.customerNameText}}</view>
+            <view class="muted small">€{{item.totals.amountEuro}}（{{item.totals.qty}}件）</view>
+            <view class="muted small">电话：{{item.phoneText}}</view>
+            <view class="muted small" wx:if="{{item.addressText}}">地址：{{item.addressText}}</view>
+            <view class="muted small" wx:if="{{item.pendingReason}}">原因：{{item.pendingReason}}</view>
+          </view>
+        </view>
+      </view>
+    </block>
+  </view>
+</scroll-view>
+

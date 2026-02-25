@@ -1,5 +1,6 @@
 const { formatTime, centToEuro } = require('./format')
 const { outOfStockMessage: buildOutOfStockMessage } = require('./order-errors')
+const { getOrderMainStatus } = require('./order-status')
 
 function formatAddress(addr) {
   if (!addr) return ''
@@ -9,10 +10,7 @@ function formatAddress(addr) {
 
 function decorateOrder(order) {
   if (!order) return null
-  let statusText = '有效'
-  if (order.status === 'CANCELLED') statusText = '已取消'
-  if (order.status === 'PENDING_REVIEW') statusText = '待确认'
-  if (order.status === 'REJECTED') statusText = '已拒绝'
+  const mainStatus = getOrderMainStatus(order)
   const fulfillmentText = order.fulfillmentType === 'pickup' ? '自取' : '配送'
   const items = (order.items || []).map((it) => ({
     ...it,
@@ -21,7 +19,9 @@ function decorateOrder(order) {
   const totals = order.totals || { amountCents: 0, qty: 0 }
   return {
     ...order,
-    statusText,
+    statusText: mainStatus.text,
+    statusClass: mainStatus.className,
+    statusCode: mainStatus.code,
     fulfillmentText,
     createdAtText: formatTime(order.createdAt),
     addressText: formatAddress(order.address),

@@ -93,7 +93,7 @@ function normalizeStoredAddresses(input) {
   for (const raw of arr) {
     const normalized = normalizeAddressPayload(raw, { requireLabel: true })
     if (!normalized) continue
-    const id = String((raw && raw.id) || '').trim() || buildAddressId()
+    const id = String((raw && (raw.id || raw._id)) || '').trim() || buildAddressId()
     if (seen.has(id)) continue
     seen.add(id)
     out.push({

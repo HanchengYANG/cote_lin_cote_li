@@ -1,6 +1,8 @@
 const { call } = require('./api')
 const { getSession } = require('./session')
 
+const SNAPSHOT_TTL_MS = 15 * 1000
+
 function getStore() {
   const app = typeof getApp === 'function' ? getApp() : null
   if (!app) {
@@ -28,6 +30,7 @@ function normalizeSale(raw) {
       saleId: '',
       status: '',
       deliveryTimeSlotLabel: '',
+      note: '',
       _id: '',
     }
   }
@@ -35,7 +38,16 @@ function normalizeSale(raw) {
     saleId: String(raw.saleId || raw._id || '').trim(),
     status: String(raw.status || '').trim(),
     deliveryTimeSlotLabel: String(raw.deliveryTimeSlotLabel || '').trim(),
+    note: String(raw.note || '').trim(),
     _id: String(raw._id || raw.saleId || '').trim(),
+  }
+}
+
+function normalizeMyCurrentSaleOrder(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  return {
+    hasActiveOrder: !!raw.hasActiveOrder,
+    fulfillmentType: String(raw.fulfillmentType || '').trim(),
   }
 }
 
@@ -44,6 +56,7 @@ function normalizePayload(raw) {
   const dishes = Array.isArray(raw && raw.dishes) ? raw.dishes : []
   const profile = raw && raw.profile && typeof raw.profile === 'object' ? raw.profile : null
   const admin = raw && raw.admin && typeof raw.admin === 'object' ? raw.admin : null
+  const myCurrentSaleOrder = normalizeMyCurrentSaleOrder(raw && raw.myCurrentSaleOrder)
   const session =
     raw && raw.session && typeof raw.session === 'object'
       ? {
@@ -56,6 +69,7 @@ function normalizePayload(raw) {
     dishes,
     profile,
     admin,
+    myCurrentSaleOrder,
     session,
     updatedAt: Date.now(),
   }
@@ -63,12 +77,24 @@ function normalizePayload(raw) {
 
 function getSnapshot() {
   const store = getStore()
-  return store.valid ? store.payload : null
+  if (!store.valid || !store.payload) return null
+  if (!isPayloadFresh(store.payload)) {
+    store.valid = false
+    store.payload = null
+    return null
+  }
+  return store.payload
 }
 
 function isSnapshotValid() {
   const store = getStore()
-  return !!(store.valid && store.payload)
+  return !!(store.valid && store.payload && isPayloadFresh(store.payload))
+}
+
+function isPayloadFresh(payload) {
+  const updatedAt = Number(payload && payload.updatedAt)
+  if (!Number.isFinite(updatedAt) || updatedAt <= 0) return false
+  return Date.now() - updatedAt < SNAPSHOT_TTL_MS
 }
 
 function setSnapshot(input) {
@@ -88,7 +114,7 @@ async function ensureFresh(options = {}) {
   const force = !!options.force
   const includeAdmin = !!options.includeAdmin
   const store = getStore()
-  if (!force && store.valid && store.payload) return store.payload
+  if (!force && store.valid && store.payload && isPayloadFresh(store.payload)) return store.payload
 
   const [homeRes, sess] = await Promise.all([call('customer', 'bootstrapHome'), getSession()])
   if (!homeRes.ok || !homeRes.data) {
@@ -116,6 +142,7 @@ async function ensureFresh(options = {}) {
     sale: homeRes.data.sale,
     dishes: homeRes.data.dishes,
     profile: homeRes.data.profile,
+    myCurrentSaleOrder: homeRes.data.myCurrentSaleOrder,
     session: {
       openId: String(sess.openId || '').trim(),
       isAdmin: !!sess.isAdmin,

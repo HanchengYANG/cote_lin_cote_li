@@ -2,36 +2,51 @@
 <sync-guard ready="{{isReady}}" error="{{syncError}}" bindretry="onSyncRetry"></sync-guard>
 <scroll-view class="scrollarea" scroll-y type="list">
   <view class="page">
-    <view class="card" wx:if="{{initialLoading}}">
+    <view class="card" wx:if="{{loadPhase!=='ready'}}">
       <view class="muted">载入中...</view>
     </view>
     <block wx:else>
       <view class="card">
-        <view class="title">常用功能</view>
-        <view class="action-row">
-          <button class="btn ghost half-btn" bindtap="goMyOrders">我的订单</button>
-          <button class="btn ghost half-btn" bindtap="goAddressBook">地址管理</button>
-        </view>
-        <view class="muted small">微信号小程序无法自动获取，店主将通过你填写的电话联系你。</view>
-      </view>
-
-      <view class="card">
         <view class="title">昵称</view>
-        <input class="input" type="nickname" placeholder="请输入昵称" value="{{nickname}}" bindinput="onNickInput" />
+        <input class="input" type="nickname" placeholder="请输入昵称" value="{{nickname}}" bindinput="onNickInput" bindblur="onNickBlur" />
       </view>
 
       <view class="card">
-        <view class="title">联系电话（自取用）</view>
-        <input class="input" placeholder="可选，填写后自取下单可自动带出" value="{{profilePhone}}" bindinput="onPhoneInput" />
+        <view class="title">联系电话</view>
+        <input class="input" placeholder="可选，店主会通过电话联系你" value="{{profilePhone}}" bindinput="onPhoneInput" bindblur="onPhoneBlur" />
+        <view class="muted small">填写后下单会自动带出。</view>
       </view>
 
       <view class="card">
-        <view class="title">默认地址</view>
-        <view class="muted">{{defaultAddressSummary}}</view>
+        <view class="row">
+          <view class="title">默认地址</view>
+          <button class="btn ghost mini" bindtap="goAddressBook">管理地址</button>
+        </view>
+        <view class="picker" wx:if="{{defaultAddressTitle}}">当前地址：{{defaultAddressTitle}}</view>
+        <view class="picker" wx:else>当前地址：请选择地址</view>
+        <view class="muted small" wx:if="{{defaultAddressDetail}}">{{defaultAddressDetail}}</view>
         <view class="muted small">如需修改默认地址，请进入“地址管理”。</view>
       </view>
 
-      <button class="btn" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存</button>
+      <view class="card">
+        <view class="title">历史订单</view>
+        <view class="muted small" wx:if="{{historyOrdersError}}">{{historyOrdersError}}</view>
+        <view class="history-empty muted" wx:if="{{historyOrders.length===0}}">暂无订单</view>
+        <view class="order-list" wx:else>
+          <view class="order-item" wx:for="{{historyOrders}}" wx:key="_id" bindtap="goOrderDetail" data-id="{{item._id}}">
+            <view class="order-item-top">
+              <view class="tag {{item.statusClass}}">{{item.statusText}}</view>
+              <view class="muted small">{{item.createdAtText}}</view>
+            </view>
+            <view class="order-item-mid">
+              <view class="order-strong">{{item.fulfillmentText}}</view>
+              <view class="muted small" wx:if="{{item.deliveryTimeSlotLabelSnapshot}}">时间段：{{item.deliveryTimeSlotLabelSnapshot}}</view>
+            </view>
+            <view class="muted small">共 {{item.totals.qty}} 件，€{{item.totals.amountEuro}}</view>
+          </view>
+        </view>
+        <button class="btn ghost order-list-btn" bindtap="goMyOrders">查看全部订单</button>
+      </view>
     </block>
   </view>
 </scroll-view>

@@ -71,6 +71,11 @@ page {
   line-height: 88rpx;
   margin-top: 14rpx;
 }
+.btn.secondary {
+  background: #eef2f6;
+  color: #111;
+  border: 1rpx solid rgba(17, 17, 17, 0.08);
+}
 .btn.ghost {
   background: transparent;
   color: #111;
@@ -97,4 +102,28 @@ page {
   font-size: 24rpx;
   font-weight: 600;
   word-break: break-all;
+}
+
+.action-row {
+  display: flex;
+  align-items: center;
+  margin-top: 14rpx;
+}
+
+.action-cell {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.action-cell + .action-cell {
+  margin-left: 12rpx;
+}
+
+.action-row .btn {
+  width: 100%;
+  margin-top: 0;
+  padding: 0 12rpx;
+  white-space: nowrap;
+  text-align: center;
+  box-sizing: border-box;
 }
