@@ -72,8 +72,14 @@
         <view class="muted small">勾选后将在本次“开单”时自动确认，并占用本次库存。</view>
       </view>
 
-      <button class="btn" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存草稿</button>
-      <button class="btn ghost" loading="{{opening}}" disabled="{{opening || openDisabled}}" bindtap="openSale">开单</button>
+      <view class="action-row">
+        <view class="action-cell">
+          <button class="btn secondary" loading="{{saving}}" disabled="{{saving}}" bindtap="save">💾 保存草稿</button>
+        </view>
+        <view class="action-cell">
+          <button class="btn" loading="{{opening}}" disabled="{{opening || openDisabled}}" bindtap="openSale">🚀 开单</button>
+        </view>
+      </view>
     </view>
   </view>
 </scroll-view>

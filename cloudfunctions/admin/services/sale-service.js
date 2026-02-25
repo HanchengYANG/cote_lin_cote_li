@@ -130,7 +130,10 @@ function createSaleService(deps) {
     async getOrCreateDraft() {
       const sales = await listSalesFn(50)
       const draft = (sales || []).find((s) => s.status === 'DRAFT')
-      if (draft) return ok({ sale: draft })
+      if (draft) {
+        const hydratedDraft = await getSale(draft._id)
+        return ok({ sale: hydratedDraft })
+      }
       const now = db.serverDate()
       const addRes = await db.collection('sales').add({
         data: {

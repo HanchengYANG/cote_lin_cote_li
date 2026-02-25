@@ -49,6 +49,14 @@ page {
   min-width: 0;
 }
 
+.info-subline {
+  margin-top: 8rpx;
+}
+
+.info-progress-line .muted {
+  color: #475467;
+}
+
 .notice-inline {
   margin-top: 14rpx;
 }
@@ -96,14 +104,16 @@ page {
 
 .notice-text.collapsed {
   white-space: normal;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
 }
 
 .notice-text.expanded {
   white-space: pre-wrap;
+}
+
+.notice-line {
+  line-height: 1.55;
+  word-break: break-word;
+  min-height: 1.55em;
 }
 
 .error-strip {

@@ -60,23 +60,47 @@ function decorateProductionItem(item) {
   }
 }
 
+function buildProductionBoard(raw) {
+  const items = (Array.isArray(raw && raw.items) ? raw.items : []).map(decorateProductionItem)
+  let totalNeedQty = 0
+  let totalPreparedQty = 0
+  let totalPreparedCapped = 0
+  items.forEach((it) => {
+    const needQty = Math.max(0, Number(it.needQty || 0))
+    const preparedQty = Math.max(0, Number(it.preparedQty || 0))
+    totalNeedQty += needQty
+    totalPreparedQty += preparedQty
+    totalPreparedCapped += Math.min(needQty, preparedQty)
+  })
+  const completionPercent =
+    totalNeedQty > 0 ? Math.max(0, Math.min(100, Math.round((totalPreparedCapped * 100) / totalNeedQty))) : 0
+  return {
+    totalNeedQty,
+    totalPreparedQty,
+    completionPercent,
+    items,
+  }
+}
+
+function emptyProductionBoard() {
+  return buildProductionBoard({ items: [] })
+}
+
 createPage({
   data: {
     loadPhase: 'loading',
     loadingSales: false,
     loadingBoard: false,
-    operatingDishId: '',
+    savingBoard: false,
+    completingAll: false,
+    productionDirty: false,
     saleOptions: [{ label: '加载中...', value: '', status: '' }],
     saleIndex: 0,
     saleLabel: '加载中...',
     sale: null,
     canEdit: false,
-    production: {
-      totalNeedQty: 0,
-      totalPreparedQty: 0,
-      completionPercent: 0,
-      items: [],
-    },
+    production: emptyProductionBoard(),
+    productionDraft: emptyProductionBoard(),
   },
 
   onLoad(query) {
@@ -106,7 +130,9 @@ createPage({
           saleLabel: '加载失败',
           sale: null,
           canEdit: false,
-          production: { totalNeedQty: 0, totalPreparedQty: 0, completionPercent: 0, items: [] },
+          production: emptyProductionBoard(),
+          productionDraft: emptyProductionBoard(),
+          productionDirty: false,
         })
         wx.showToast({ title: salesRes.message || '加载失败', icon: 'none' })
         return
@@ -136,11 +162,26 @@ createPage({
   onPickSale(e) {
     const saleIndex = Number((e.detail && e.detail.value) || 0)
     const picked = this.data.saleOptions[saleIndex] || { label: '未选择', value: '' }
-    this.setData({
-      saleIndex,
-      saleLabel: picked.label || '未选择',
+    if (saleIndex === this.data.saleIndex) return
+    const proceed = () => {
+      this.setData({
+        saleIndex,
+        saleLabel: picked.label || '未选择',
+      })
+      this.loadBoard()
+    }
+    if (!this.data.productionDirty) {
+      proceed()
+      return
+    }
+    wx.showModal({
+      title: '切换开单',
+      content: '当前有未保存修改，切换开单会丢失这些修改。是否继续？',
+      confirmColor: '#d93025',
+      success: (res) => {
+        if (res && res.confirm) proceed()
+      },
     })
-    this.loadBoard()
   },
 
   async loadBoard() {
@@ -155,7 +196,9 @@ createPage({
       this.setData({
         sale: null,
         canEdit: false,
-        production: { totalNeedQty: 0, totalPreparedQty: 0, completionPercent: 0, items: [] },
+        production: emptyProductionBoard(),
+        productionDraft: emptyProductionBoard(),
+        productionDirty: false,
       })
       finishLoadPhase()
       return
@@ -169,52 +212,108 @@ createPage({
       this.setData({
         sale: null,
         canEdit: false,
-        production: { totalNeedQty: 0, totalPreparedQty: 0, completionPercent: 0, items: [] },
+        production: emptyProductionBoard(),
+        productionDraft: emptyProductionBoard(),
+        productionDirty: false,
       })
       wx.showToast({ title: res.message || '加载失败', icon: 'none' })
       return
     }
     const sale = res.data && res.data.sale ? res.data.sale : null
-    const production = (res.data && res.data.production) || { totalNeedQty: 0, totalPreparedQty: 0, completionPercent: 0, items: [] }
+    const production = buildProductionBoard((res.data && res.data.production) || emptyProductionBoard())
     this.setData({
       sale: sale ? { ...sale, statusText: saleStatusText(sale.status) } : null,
       canEdit: !!(res.data && res.data.canEdit),
-      production: {
-        totalNeedQty: Number(production.totalNeedQty || 0),
-        totalPreparedQty: Number(production.totalPreparedQty || 0),
-        completionPercent: Number(production.completionPercent || 0),
-        items: (Array.isArray(production.items) ? production.items : []).map(decorateProductionItem),
-      },
+      production,
+      productionDraft: buildProductionBoard(production),
+      productionDirty: false,
     })
   },
 
   async onAdjustPrepared(e) {
-    if (!this.data.canEdit || this.data.loadingBoard || this.data.operatingDishId) return
+    if (!this.data.canEdit || this.data.loadingBoard || this.data.savingBoard || this.data.completingAll) return
     const dishId = readDatasetString(e, 'id')
     const delta = readDatasetNumber(e, 'delta', 0)
     if (!dishId || !delta) return
-    const saleId = String((this.data.sale && this.data.sale._id) || '').trim()
-    if (!saleId) return
-    const item = (this.data.production.items || []).find((it) => String(it.dishId || '') === dishId)
+    const item = (this.data.productionDraft.items || []).find((it) => String(it.dishId || '') === dishId)
     if (!item) return
-    const preparedQty = Math.max(0, Number(item.preparedQty || 0) + delta)
-    this.setData({ operatingDishId: dishId })
-    const res = await call('admin', 'updateSaleProductionProgress', { saleId, dishId, preparedQty })
-    this.setData({ operatingDishId: '' })
-    if (!res.ok) {
-      wx.showToast({ title: res.message || '更新失败', icon: 'none' })
-      await this.loadBoard()
-      return
-    }
-    const production = (res.data && res.data.production) || { totalNeedQty: 0, totalPreparedQty: 0, completionPercent: 0, items: [] }
+    const nextItems = (this.data.productionDraft.items || []).map((it) => {
+      if (String(it.dishId || '') !== dishId) return { ...it }
+      return { ...it, preparedQty: Math.max(0, Number(it.preparedQty || 0) + delta) }
+    })
+    const productionDraft = buildProductionBoard({ items: nextItems })
     this.setData({
-      production: {
-        totalNeedQty: Number(production.totalNeedQty || 0),
-        totalPreparedQty: Number(production.totalPreparedQty || 0),
-        completionPercent: Number(production.completionPercent || 0),
-        items: (Array.isArray(production.items) ? production.items : []).map(decorateProductionItem),
-      },
+      productionDraft,
+      productionDirty: true,
     })
   },
-})
 
+  buildSavePayloadItems(items) {
+    return (Array.isArray(items) ? items : [])
+      .map((it) => ({
+        dishId: String((it && it.dishId) || '').trim(),
+        preparedQty: Math.max(0, Number((it && it.preparedQty) || 0)),
+      }))
+      .filter((it) => it.dishId)
+  },
+
+  async saveProductionBoardWithItems(items, { successTitle = '已保存', failTitle = '保存失败' } = {}) {
+    const saleId = String((this.data.sale && this.data.sale._id) || '').trim()
+    if (!saleId) return false
+    this.setData({ savingBoard: true })
+    const res = await call('admin', 'saveSaleProductionBoard', {
+      saleId,
+      items: this.buildSavePayloadItems(items),
+    })
+    this.setData({ savingBoard: false, completingAll: false })
+    if (!res.ok) {
+      wx.showToast({ title: res.message || failTitle, icon: 'none' })
+      await this.loadBoard()
+      return false
+    }
+    const production = buildProductionBoard((res.data && res.data.production) || emptyProductionBoard())
+    this.setData({
+      production,
+      productionDraft: buildProductionBoard(production),
+      productionDirty: false,
+    })
+    wx.showToast({ title: successTitle, icon: 'success' })
+    return true
+  },
+
+  async onSaveProductionBoard() {
+    if (!this.data.canEdit || this.data.loadingBoard || this.data.savingBoard || this.data.completingAll || !this.data.productionDirty) return
+    await this.saveProductionBoardWithItems(this.data.productionDraft.items, { successTitle: '已保存', failTitle: '保存失败' })
+  },
+
+  async onCompleteAllPrepared() {
+    if (!this.data.canEdit || this.data.loadingBoard || this.data.savingBoard || this.data.completingAll) return
+    const items = Array.isArray(this.data.productionDraft.items) ? this.data.productionDraft.items : []
+    if (!items.length) return
+    const modalRes = await new Promise((resolve) => {
+      wx.showModal({
+        title: '一键完成',
+        content: '将把所有菜品已生产数量设置为需做数量，并立即保存。是否继续？',
+        confirmColor: '#d93025',
+        success: resolve,
+        fail: () => resolve({ confirm: false }),
+      })
+    })
+    if (!modalRes.confirm) return
+    const nextItems = items.map((it) => ({ ...it, preparedQty: Math.max(0, Number(it.needQty || 0)) }))
+    this.setData({
+      productionDraft: buildProductionBoard({ items: nextItems }),
+      productionDirty: true,
+      completingAll: true,
+    })
+    const ok = await this.saveProductionBoardWithItems(nextItems, {
+      successTitle: '已全部标记完成',
+      failTitle: '一键完成失败',
+    })
+    if (ok) {
+      setTimeout(() => {
+        wx.navigateBack()
+      }, 180)
+    }
+  },
+})

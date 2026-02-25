@@ -1,5 +1,6 @@
 const { call } = require('../../../utils/api')
 const { invalidateSnapshot } = require('../../../utils/app-snapshot')
+const { showErrorDialog } = require('../../../utils/error-feedback')
 const { normalizePhone, isPhoneValid } = require('../../../utils/phone')
 const { normalizeFrAddress, isFrAddressValid } = require('../../../utils/fr-address')
 const { parseSlotLabel, buildSlotLabel } = require('../../../utils/delivery-slot')
@@ -82,6 +83,13 @@ function normalizeManualAddress(input) {
 
 function isManualAddressValid(addr) {
   return isFrAddressValid(normalizeManualAddress(addr), { requirePhone: false, requireLabel: false })
+}
+
+function navigateBackAfterSuccess(title) {
+  wx.showToast({ title: title || '已保存', icon: 'success' })
+  setTimeout(() => {
+    wx.navigateBack()
+  }, 180)
 }
 
 createPage({
@@ -405,8 +413,7 @@ createPage({
       return
     }
     invalidateSnapshot()
-    wx.showToast({ title: '已保存', icon: 'success' })
-    await this.reload()
+    navigateBackAfterSuccess('已保存')
   },
 
   async onCancelOrder() {
@@ -430,8 +437,7 @@ createPage({
       return
     }
     invalidateSnapshot()
-    wx.showToast({ title: '已取消', icon: 'success' })
-    await this.reload()
+    navigateBackAfterSuccess('已取消')
   },
 
   onPickDate(e) {
@@ -575,7 +581,20 @@ createPage({
 
     const res = await call('admin', 'updateOrderFulfillment', payload)
     if (!res.ok) {
-      wx.showToast({ title: res.message || '保存交货方式失败', icon: 'none' })
+      await showErrorDialog(
+        {
+          message: res.message || '保存交货方式失败',
+          code: res.code || '',
+          detail: {
+            action: 'admin.updateOrderFulfillment',
+            payload,
+            backendDetail: res.detail || '',
+          },
+        },
+        {
+          title: '保存交货方式失败',
+        }
+      )
       return { ok: false, changed: false }
     }
     return { ok: true, changed: true }

@@ -24,6 +24,32 @@ function createFulfillmentWriteService(deps) {
     getOrCreateRuntimeStateTx,
   } = deps
 
+  function toProductionPayload(items) {
+    const nextItems = Array.isArray(items) ? items : []
+    let totalNeedQty = 0
+    let totalPreparedQty = 0
+    let totalPreparedCapped = 0
+    nextItems.forEach((it) => {
+      const needQty = Math.max(0, toSafeInt(it && it.needQty, 0))
+      const preparedQty = Math.max(0, toSafeInt(it && it.preparedQty, 0))
+      totalNeedQty += needQty
+      totalPreparedQty += preparedQty
+      totalPreparedCapped += Math.min(needQty, preparedQty)
+    })
+    const completionPercent = totalNeedQty > 0 ? Math.max(0, Math.min(100, Math.round((totalPreparedCapped * 100) / totalNeedQty))) : 0
+    return {
+      totalNeedQty,
+      totalPreparedQty,
+      completionPercent,
+      items: nextItems.map((it) => ({
+        dishId: it.dishId,
+        dishName: it.dishNameSnapshot,
+        needQty: it.needQty,
+        preparedQty: it.preparedQty,
+      })),
+    }
+  }
+
   return {
     async updateSaleProductionProgress(event, ctx) {
       const openId = ctx && ctx.openId
@@ -47,24 +73,11 @@ function createFulfillmentWriteService(deps) {
         if (idx < 0) return fail('BAD_REQUEST', 'Dish not found in sale')
         const nextItems = board.items.map((it, i) => (i === idx ? { ...it, preparedQty } : it))
         await saveSaleProductionProgressBoard(saleId, nextItems, openId)
-        const totalNeedQty = nextItems.reduce((sum, it) => sum + Math.max(0, toSafeInt(it.needQty, 0)), 0)
-        const totalPreparedQty = nextItems.reduce((sum, it) => sum + Math.max(0, toSafeInt(it.preparedQty, 0)), 0)
-        const completionPercent = totalNeedQty > 0 ? Math.min(100, Math.round((totalPreparedQty / totalNeedQty) * 100)) : 100
         return ok({
           saleId,
           dishId,
           preparedQty,
-          production: {
-            totalNeedQty,
-            totalPreparedQty,
-            completionPercent,
-            items: nextItems.map((it) => ({
-              dishId: it.dishId,
-              dishName: it.dishNameSnapshot,
-              needQty: it.needQty,
-              preparedQty: it.preparedQty,
-            })),
-          },
+          production: toProductionPayload(nextItems),
         })
       } catch (err) {
         const msg = String((err && (err.errMsg || err.message)) || '')
@@ -72,6 +85,61 @@ function createFulfillmentWriteService(deps) {
           return fail('COLLECTION_NOT_FOUND', '请先创建数据库集合 sale_production_progress', msg)
         }
         return fail('TX_FAILED', 'Update production progress failed', msg || String(err))
+      }
+    },
+
+    async saveSaleProductionBoard(event, ctx) {
+      const openId = ctx && ctx.openId
+      const saleId = String(event.saleId || '').trim()
+      const rawItems = Array.isArray(event.items) ? event.items : null
+      if (!saleId) return fail('BAD_REQUEST', 'Missing saleId')
+      if (!rawItems) return fail('BAD_REQUEST', 'Missing items')
+
+      let sale = null
+      try {
+        sale = await getSale(saleId)
+      } catch (err) {
+        sale = null
+      }
+      if (!sale) return fail('NOT_FOUND', 'Sale not found')
+      const saleStatus = String((sale && sale.status) || '').trim()
+      if (saleStatus !== SALE_STATUS.CLOSED) return fail('BAD_REQUEST', 'Only CLOSED sale can save production board')
+
+      try {
+        const board = await buildSaleProductionBoardBySale(sale)
+        const boardDishIds = new Set(
+          (Array.isArray(board && board.items) ? board.items : []).map((it) => String((it && it.dishId) || '').trim()).filter(Boolean)
+        )
+        const preparedMap = new Map()
+        const invalidDishIds = []
+        rawItems.forEach((it) => {
+          const dishId = String((it && it.dishId) || '').trim()
+          if (!dishId) return
+          if (!boardDishIds.has(dishId)) {
+            invalidDishIds.push(dishId)
+            return
+          }
+          preparedMap.set(dishId, Math.max(0, toSafeInt(it && it.preparedQty, 0)))
+        })
+        if (invalidDishIds.length) {
+          return fail('BAD_REQUEST', 'Contains invalid dishIds', { invalidDishIds })
+        }
+        const nextItems = (Array.isArray(board && board.items) ? board.items : []).map((it) => {
+          const dishId = String((it && it.dishId) || '').trim()
+          if (!preparedMap.has(dishId)) return { ...it }
+          return { ...it, preparedQty: preparedMap.get(dishId) }
+        })
+        await saveSaleProductionProgressBoard(saleId, nextItems, openId)
+        return ok({
+          saleId,
+          production: toProductionPayload(nextItems),
+        })
+      } catch (err) {
+        const msg = String((err && (err.errMsg || err.message)) || '')
+        if (/collection not exists|Db or Table not exist/i.test(msg)) {
+          return fail('COLLECTION_NOT_FOUND', '请先创建数据库集合 sale_production_progress', msg)
+        }
+        return fail('TX_FAILED', 'Save production board failed', msg || String(err))
       }
     },
 
@@ -434,4 +502,3 @@ function createFulfillmentWriteService(deps) {
 module.exports = {
   createFulfillmentWriteService,
 }
-

@@ -261,9 +261,10 @@ function createOrderWriteService(deps) {
         const currentPhone = normalizePhone(order.contact && order.contact.phone)
         const nextData = {
           fulfillmentType,
-          contact: {
+          // Use _.set to replace the whole object; direct nested merge fails when contact/address is null.
+          contact: _.set({
             phone: hasPhoneInput ? requestedPhone : currentPhone,
-          },
+          }),
           updatedAt: db.serverDate(),
         }
         let addressSource = 'unchanged'
@@ -307,7 +308,7 @@ function createOrderWriteService(deps) {
           }
           if (!nextAddress) return fail('BAD_REQUEST', '配送订单缺少有效地址')
           if (!isPhoneValid(nextData.contact.phone)) return fail('INVALID_PHONE', '请填写有效电话')
-          nextData.address = nextAddress
+          nextData.address = _.set(nextAddress)
           nextData.addressId = nextAddressId
 
           if (!slotLabel) slotLabel = String(order.deliveryTimeSlotLabelSnapshot || '').trim()

@@ -43,11 +43,20 @@ function normalizeSale(raw) {
   }
 }
 
+function normalizeMyCurrentSaleOrder(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  return {
+    hasActiveOrder: !!raw.hasActiveOrder,
+    fulfillmentType: String(raw.fulfillmentType || '').trim(),
+  }
+}
+
 function normalizePayload(raw) {
   const sale = normalizeSale(raw && raw.sale)
   const dishes = Array.isArray(raw && raw.dishes) ? raw.dishes : []
   const profile = raw && raw.profile && typeof raw.profile === 'object' ? raw.profile : null
   const admin = raw && raw.admin && typeof raw.admin === 'object' ? raw.admin : null
+  const myCurrentSaleOrder = normalizeMyCurrentSaleOrder(raw && raw.myCurrentSaleOrder)
   const session =
     raw && raw.session && typeof raw.session === 'object'
       ? {
@@ -60,6 +69,7 @@ function normalizePayload(raw) {
     dishes,
     profile,
     admin,
+    myCurrentSaleOrder,
     session,
     updatedAt: Date.now(),
   }
@@ -132,6 +142,7 @@ async function ensureFresh(options = {}) {
     sale: homeRes.data.sale,
     dishes: homeRes.data.dishes,
     profile: homeRes.data.profile,
+    myCurrentSaleOrder: homeRes.data.myCurrentSaleOrder,
     session: {
       openId: String(sess.openId || '').trim(),
       isAdmin: !!sess.isAdmin,

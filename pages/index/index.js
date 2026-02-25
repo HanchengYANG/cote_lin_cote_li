@@ -24,6 +24,58 @@ function saleIsOpen(saleInfo) {
   return !!(saleInfo && String(saleInfo.status || '').trim() === 'OPEN')
 }
 
+function normalizeMyCurrentSaleOrder(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return { hasActiveOrder: false, fulfillmentType: '' }
+  }
+  return {
+    hasActiveOrder: !!raw.hasActiveOrder,
+    fulfillmentType: String(raw.fulfillmentType || '').trim(),
+  }
+}
+
+function buildCustomerOrderProgressText(saleInfo, myCurrentSaleOrder) {
+  const saleStatus = String((saleInfo && saleInfo.status) || '').trim()
+  const hasActiveOrder = !!(myCurrentSaleOrder && myCurrentSaleOrder.hasActiveOrder)
+  if (!hasActiveOrder) return ''
+  const fulfillmentType = String((myCurrentSaleOrder && myCurrentSaleOrder.fulfillmentType) || '').trim()
+  if (saleStatus === 'OPEN') return '你已下单，可继续追加或修改订单。'
+  if (saleStatus === 'CLOSED') return '你已下单，本次正在备餐中。'
+  if (saleStatus === 'FULFILLING') {
+    return fulfillmentType === 'pickup' ? '你已下单，可留意取餐通知。' : '你已下单，本次已开始配送。'
+  }
+  return ''
+}
+
+function shouldShowDeliverySlotForCurrentCustomer(saleInfo, myCurrentSaleOrder) {
+  const label = String((saleInfo && saleInfo.deliveryTimeSlotLabel) || '').trim()
+  if (!label) return false
+  const hasActiveOrder = !!(myCurrentSaleOrder && myCurrentSaleOrder.hasActiveOrder)
+  if (!hasActiveOrder) return false
+  const fulfillmentType = String((myCurrentSaleOrder && myCurrentSaleOrder.fulfillmentType) || '').trim()
+  return fulfillmentType === 'delivery'
+}
+
+function buildNoticePreview(note, maxLen = 26) {
+  const full = String(note || '')
+  const hasLineBreak = /\r?\n/.test(full)
+  const compact = full.replace(/\s+/g, ' ').trim()
+  if (!compact) return { text: '', canToggle: false }
+  if (compact.length <= maxLen) {
+    return { text: compact, canToggle: hasLineBreak }
+  }
+  return {
+    text: `${compact.slice(0, maxLen).trim()}…`,
+    canToggle: true,
+  }
+}
+
+function buildNoticeLines(note) {
+  return String(note || '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+}
+
 function sortDishesBySaleState(dishes, saleInfo) {
   if (!saleIsOpen(saleInfo)) return dishes
   const sorted = [...dishes]
@@ -55,6 +107,9 @@ createPage({
       addressCount: 0,
       defaultAddressId: '',
     },
+    myCurrentSaleOrder: null,
+    customerOrderProgressText: '',
+    shouldShowDeliverySlot: false,
     dishes: [],
     qtyMap: {},
     totalQty: 0,
@@ -65,6 +120,9 @@ createPage({
     nicknameSaving: false,
     nicknamePopupError: '',
     noticeCollapsed: true,
+    noticePreviewText: '',
+    noticeCanToggle: false,
+    noticeLines: [],
   },
 
   onLoad() {
@@ -103,7 +161,7 @@ createPage({
       addressCount: Number((rawProfile && rawProfile.addressCount) || 0),
       defaultAddressId: String((rawProfile && rawProfile.defaultAddressId) || ''),
     }
-    this.applyBootstrap(snapshot.sale, snapshot.dishes, rawProfile, snapshot.session || null)
+    this.applyBootstrap(snapshot.sale, snapshot.dishes, rawProfile, snapshot.session || null, snapshot.myCurrentSaleOrder || null)
     const patch = {
       showNicknamePopup: !profileSummary.isComplete,
     }
@@ -117,7 +175,7 @@ createPage({
     return true
   },
 
-  applyBootstrap(rawSale, rawDishes, rawProfile, rawSession) {
+  applyBootstrap(rawSale, rawDishes, rawProfile, rawSession, rawMyCurrentSaleOrder) {
     const prevQtyMap = { ...(this.data.qtyMap || {}) }
     const saleInfo = {
       saleId: String((rawSale && rawSale.saleId) || ''),
@@ -158,9 +216,20 @@ createPage({
       addressCount: Number((rawProfile && rawProfile.addressCount) || 0),
       defaultAddressId: String((rawProfile && rawProfile.defaultAddressId) || ''),
     }
+    const myCurrentSaleOrder = normalizeMyCurrentSaleOrder(rawMyCurrentSaleOrder)
+    const customerOrderProgressText = buildCustomerOrderProgressText(saleInfo, myCurrentSaleOrder)
+    const shouldShowDeliverySlot = shouldShowDeliverySlotForCurrentCustomer(saleInfo, myCurrentSaleOrder)
+    const noticePreview = buildNoticePreview(saleInfo.note)
+    const noticeLines = buildNoticeLines(saleInfo.note)
     this.setData({
       saleInfo,
       profileSummary,
+      myCurrentSaleOrder,
+      customerOrderProgressText,
+      shouldShowDeliverySlot,
+      noticePreviewText: noticePreview.text,
+      noticeCanToggle: noticePreview.canToggle,
+      noticeLines,
       dishes: sorted,
       qtyMap,
       totalQty,

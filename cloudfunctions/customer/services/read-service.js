@@ -53,6 +53,28 @@ function createReadService(deps) {
       const openId = ctx && ctx.openId
       const sale = await getCurrentSaleDoc()
       const profileDoc = await ensureCustomerDoc(openId)
+      let myCurrentSaleOrder = null
+      if (sale && sale._id && openId) {
+        let activeOrder = null
+        try {
+          const activeRes = await db
+            .collection('orders')
+            .where({
+              saleId: String(sale._id),
+              customerOpenId: openId,
+              status: ORDER_STATUS.ACTIVE,
+            })
+            .limit(20)
+            .get()
+          activeOrder = pickLatestOrder(activeRes.data || [])
+        } catch (err) {
+          activeOrder = null
+        }
+        myCurrentSaleOrder = {
+          hasActiveOrder: !!activeOrder,
+          fulfillmentType: activeOrder ? String(activeOrder.fulfillmentType || '').trim() : '',
+        }
+      }
       const rows = await getAllByPaging(
         (skip, limit) =>
           db
@@ -105,7 +127,12 @@ function createReadService(deps) {
           isSoldOut: !!cfg && soldQty >= limitQty,
         }
       })
-      return ok({ sale: saleInfo, dishes: out, profile: toProfileSummary(profileDoc) })
+      return ok({
+        sale: saleInfo,
+        dishes: out,
+        profile: toProfileSummary(profileDoc),
+        myCurrentSaleOrder,
+      })
     },
 
     async getCurrentSale() {

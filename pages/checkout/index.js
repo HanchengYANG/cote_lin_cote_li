@@ -178,26 +178,16 @@ createPage({
   },
 
   onShow() {
+    const fromAddressBook = !!this._fromAddressBook
+    this._fromAddressBook = false
     this.hydrateFromSnapshot()
     const pickedAddressId = String(wx.getStorageSync('checkout_selected_address_id') || '').trim()
-    if (pickedAddressId) {
-      wx.removeStorageSync('checkout_selected_address_id')
-      const lockedAddress = this.data.hasExistingOrder && this.data.fulfillmentType === 'delivery'
-      if (!lockedAddress) {
-        this.setData({ selectedAddressId: pickedAddressId })
-        this.applyCheckoutViewModel()
-      }
+    if (fromAddressBook) {
+      this.setData({ loadPhase: 'loading' })
+      this.reload({ silent: false, skipSaleFetch: true, preferredAddressId: pickedAddressId })
+      return
     }
-    if (this.shouldRefreshProfileOnShow()) {
-      this.reload({ silent: true, skipSaleFetch: true })
-    }
-  },
-
-  shouldRefreshProfileOnShow() {
-    const pages = getCurrentPages()
-    const prev = pages.length >= 2 ? pages[pages.length - 2] : null
-    const route = String((prev && prev.route) || '').trim()
-    return route === 'pages/address-book/index' || route === 'pages/address-edit/index'
+    this.reload({ silent: true, skipSaleFetch: true, preferredAddressId: pickedAddressId })
   },
 
   hydrateFromSnapshot() {
@@ -253,7 +243,12 @@ createPage({
   async reload(options = {}) {
     const silent = !!options.silent
     const skipSaleFetch = !!options.skipSaleFetch
+    const preferredAddressId = String(options.preferredAddressId || '').trim()
+    this._reloadSeq = Number(this._reloadSeq || 0) + 1
+    const seq = this._reloadSeq
+    const isStale = () => seq !== this._reloadSeq
     const finishLoadPhase = () => {
+      if (isStale()) return
       if (this.data.loadPhase !== 'ready') {
         this.setData({ loadPhase: 'ready' })
       }
@@ -265,11 +260,13 @@ createPage({
     let saleRes = null
     if (!skipSaleFetch) {
       saleRes = await call('customer', 'getCurrentSale')
+      if (isStale()) return
       if (saleRes && !saleRes.ok) {
         wx.showToast({ title: saleRes.message || '加载开单失败', icon: 'none' })
       }
     }
     const profileRes = await call('customer', 'getMyProfile')
+    if (isStale()) return
     if (!profileRes || !profileRes.ok || !profileRes.data || !profileRes.data.profile) {
       finishLoadPhase()
       if (!silent) this.setData({ refresherTriggered: false })
@@ -317,6 +314,15 @@ createPage({
 
     if (saleStatus !== 'open' || !sale || !sale._id) {
       let selectedAddressId = String(this.data.selectedAddressId || '').trim()
+      const lockedAddressId =
+        this.data.hasExistingOrder && this.data.fulfillmentType === 'delivery'
+          ? String(this.data.existingOrderAddressId || '').trim()
+          : ''
+      if (lockedAddressId && addresses.some((x) => x.id === lockedAddressId)) {
+        selectedAddressId = lockedAddressId
+      } else if (preferredAddressId && addresses.some((x) => x.id === preferredAddressId)) {
+        selectedAddressId = preferredAddressId
+      }
       if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = String(profile.defaultAddressId || '')
       if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = String((addresses[0] && addresses[0].id) || '')
       const pickupPhone = normalizePhone(this.data.pickupPhone || '') || profilePhone
@@ -335,6 +341,7 @@ createPage({
         selectedAddressId,
         pickupPhone,
       })
+      if (preferredAddressId) wx.removeStorageSync('checkout_selected_address_id')
       this.applyCheckoutViewModel()
       this.recalcLines()
       this.applyCheckoutViewModel()
@@ -351,6 +358,8 @@ createPage({
     if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = ''
     if (existingOrder && existingOrder.addressId) {
       selectedAddressId = String(existingOrder.addressId)
+    } else if (preferredAddressId && addresses.some((x) => x.id === preferredAddressId)) {
+      selectedAddressId = preferredAddressId
     }
     if (!selectedAddressId) selectedAddressId = String(profile.defaultAddressId || '')
     if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = String((addresses[0] && addresses[0].id) || '')
@@ -389,6 +398,7 @@ createPage({
     }
     next.pickupPhone = pickupPhone
     this.setData(next)
+    if (preferredAddressId) wx.removeStorageSync('checkout_selected_address_id')
     this.applyCheckoutViewModel()
     this.saveCart()
     this.recalcLines()
@@ -483,6 +493,7 @@ createPage({
       wx.showToast({ title: '已有订单不可修改地址', icon: 'none' })
       return
     }
+    this._fromAddressBook = true
     const selectedAddressId = String(this.data.selectedAddressId || '')
     wx.navigateTo({ url: `/pages/address-book/index?select=1&selectedAddressId=${encodeURIComponent(selectedAddressId)}` })
   },

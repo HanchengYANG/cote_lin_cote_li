@@ -81,7 +81,6 @@ createPage({
     canEdit: false,
     deliveryOrders: [],
     pickupOrders: [],
-    dirty: false,
     deliveryCollapsed: false,
     pickupCollapsed: false,
     deliveryAppendedHint: '',
@@ -116,7 +115,6 @@ createPage({
           deliveryOrders: [],
           pickupOrders: [],
           canEdit: false,
-          dirty: false,
           deliveryAppendedHint: '',
         })
         wx.showToast({ title: salesRes.message || '加载失败', icon: 'none' })
@@ -148,13 +146,12 @@ createPage({
   onPickSale(e) {
     const saleIndex = Number((e.detail && e.detail.value) || 0)
     const picked = this.data.saleOptions[saleIndex] || { label: '未选择', value: '' }
-    this.setData({
-      saleIndex,
-      saleLabel: picked.label || '未选择',
-      dirty: false,
-      deliveryAppendedHint: '',
-    })
-    this.loadPrep()
+      this.setData({
+        saleIndex,
+        saleLabel: picked.label || '未选择',
+        deliveryAppendedHint: '',
+      })
+      this.loadPrep()
   },
 
   async loadPrep() {
@@ -171,7 +168,6 @@ createPage({
         canEdit: false,
         deliveryOrders: [],
         pickupOrders: [],
-        dirty: false,
         deliveryAppendedHint: '',
       })
       finishLoadPhase()
@@ -183,7 +179,7 @@ createPage({
     this.setData({ loadingPrep: false })
     finishLoadPhase()
     if (!res.ok) {
-      this.setData({ sale: null, canEdit: false, deliveryOrders: [], pickupOrders: [], dirty: false, deliveryAppendedHint: '' })
+      this.setData({ sale: null, canEdit: false, deliveryOrders: [], pickupOrders: [], deliveryAppendedHint: '' })
       wx.showToast({ title: res.message || '加载失败', icon: 'none' })
       return
     }
@@ -200,7 +196,6 @@ createPage({
       canEdit,
       deliveryOrders: rawDeliveryOrders.map(decoratePrepOrder),
       pickupOrders: rawPickupOrders.map(decoratePrepOrder),
-      dirty: false,
       deliveryAppendedHint: appendedOrderIds.length ? `有 ${appendedOrderIds.length} 个新配送单已自动追加到末尾` : '',
     })
   },
@@ -217,30 +212,42 @@ createPage({
     if (!this.data.canEdit || this.data.loadingPrep || this.data.saving || this.data.markingPrepDone) return
     const idx = readDatasetIndex(e)
     if (idx <= 0) return
-    this.setData({ deliveryOrders: moveItem(this.data.deliveryOrders, idx, idx - 1), dirty: true })
+    const nextOrders = moveItem(this.data.deliveryOrders, idx, idx - 1)
+    this.setData({ deliveryOrders: nextOrders })
+    this.saveOrderNow(nextOrders)
   },
 
   onMoveDown(e) {
     if (!this.data.canEdit || this.data.loadingPrep || this.data.saving || this.data.markingPrepDone) return
     const idx = readDatasetIndex(e)
     if (idx < 0 || idx >= this.data.deliveryOrders.length - 1) return
-    this.setData({ deliveryOrders: moveItem(this.data.deliveryOrders, idx, idx + 1), dirty: true })
+    const nextOrders = moveItem(this.data.deliveryOrders, idx, idx + 1)
+    this.setData({ deliveryOrders: nextOrders })
+    this.saveOrderNow(nextOrders)
   },
 
-  async onSaveOrder() {
-    if (!this.data.canEdit || this.data.saving || this.data.markingPrepDone) return
+  async saveOrderNow(nextDeliveryOrders) {
+    if (!this.data.canEdit || this.data.saving || this.data.markingPrepDone) return false
     const saleId = String((this.data.sale && this.data.sale._id) || '').trim()
-    if (!saleId) return
-    const orderIds = (this.data.deliveryOrders || []).map((o) => String((o && o._id) || '').trim()).filter(Boolean)
+    if (!saleId) return false
+    const orderIds = (Array.isArray(nextDeliveryOrders) ? nextDeliveryOrders : [])
+      .map((o) => String((o && o._id) || '').trim())
+      .filter(Boolean)
     this.setData({ saving: true })
     const res = await call('admin', 'saveSaleFulfillmentOrder', { saleId, orderIds })
     this.setData({ saving: false })
     if (!res.ok) {
       wx.showToast({ title: res.message || '保存失败', icon: 'none' })
-      return
+      await this.loadPrep()
+      return false
     }
-    wx.showToast({ title: '排序已保存', icon: 'success' })
-    await this.loadPrep()
+    const appendedOrderIds = Array.isArray(res.data && res.data.appendedOrderIds) ? res.data.appendedOrderIds : []
+    if (appendedOrderIds.length) {
+      await this.loadPrep()
+      return true
+    }
+    this.setData({ deliveryAppendedHint: '' })
+    return true
   },
 
   async onMarkPrepDone() {
@@ -258,6 +265,8 @@ createPage({
     }
     invalidateSnapshot()
     wx.showToast({ title: '已进入配送中', icon: 'success' })
-    await this.reload()
+    setTimeout(() => {
+      wx.navigateBack()
+    }, 180)
   },
 })

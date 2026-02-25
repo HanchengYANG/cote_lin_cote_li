@@ -62,13 +62,12 @@
                     </view>
                   </view>
                   <view class="ops" wx:if="{{canEdit}}">
-                    <button class="mini ghost" size="mini" data-idx="{{index}}" bindtap="onMoveUp" disabled="{{index===0 || saving}}">上移</button>
-                    <button class="mini ghost" size="mini" data-idx="{{index}}" bindtap="onMoveDown" disabled="{{index===deliveryOrders.length-1 || saving}}">下移</button>
+                    <button class="mini ghost icon" size="mini" data-idx="{{index}}" bindtap="onMoveUp" disabled="{{index===0 || saving || markingPrepDone}}">⬆️</button>
+                    <button class="mini ghost icon" size="mini" data-idx="{{index}}" bindtap="onMoveDown" disabled="{{index===deliveryOrders.length-1 || saving || markingPrepDone}}">⬇️</button>
                   </view>
                 </view>
               </block>
-              <button class="btn" wx:if="{{sale && canEdit}}" loading="{{saving}}" disabled="{{saving || markingPrepDone}}" bindtap="onSaveOrder">保存排序</button>
-              <button class="btn ghost" wx:if="{{sale && canEdit && sale.status==='CLOSED'}}" loading="{{markingPrepDone}}" disabled="{{saving || markingPrepDone}}" bindtap="onMarkPrepDone">备单完成</button>
+              <view class="muted small" wx:if="{{canEdit && saving}}">排序保存中...</view>
             </block>
           </view>
 
@@ -102,6 +101,10 @@
             </block>
           </view>
         </block>
+
+        <view class="page-actions" wx:if="{{sale && canEdit && sale.status==='CLOSED'}}">
+          <button class="btn primary" loading="{{markingPrepDone}}" disabled="{{saving || markingPrepDone || loadingPrep}}" bindtap="onMarkPrepDone">✅ 备单完成</button>
+        </view>
       </block>
     </block>
   </view>

@@ -53,17 +53,21 @@
 
       <view class="card" wx:if="{{addDishOptions.length>0}}">
         <view class="title">新增菜品到本次开单</view>
-        <picker mode="selector" range="{{addDishOptions}}" range-key="label" value="{{addDishIndex}}" bindchange="onAddDishPick">
-          <view class="picker">菜品：{{addDishOptions[addDishIndex].label}}</view>
-        </picker>
-        <input class="qty-input full" type="number" placeholder="该菜总量（必填）" value="{{addLimitQty}}" bindinput="onAddLimitInput" />
-        <button class="btn ghost" bindtap="addDish">新增到本次开单</button>
+        <view class="add-dish-row">
+          <view class="add-dish-picker-wrap">
+            <picker mode="selector" range="{{addDishOptions}}" range-key="label" value="{{addDishIndex}}" bindchange="onAddDishPick">
+              <view class="picker compact">{{addDishOptions[addDishIndex].label}}</view>
+            </picker>
+          </view>
+          <input class="qty-input add-dish-qty" type="number" placeholder="数量" value="{{addLimitQty}}" bindinput="onAddLimitInput" />
+        </view>
+        <button class="btn ghost block" bindtap="addDish">➕ 新增到本次开单</button>
       </view>
       <view class="card" wx:else>
         <view class="muted small">没有可新增的上架菜品。</view>
       </view>
 
-      <button class="btn" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存本次开单</button>
+      <button class="btn block" loading="{{saving}}" disabled="{{saving}}" bindtap="save">💾 保存本次开单</button>
     </view>
   </view>
 </scroll-view>
