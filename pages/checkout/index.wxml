@@ -49,7 +49,9 @@
     <view class="card" wx:if="{{fulfillmentType==='delivery'}}">
       <view class="row">
         <view class="title">下单地址</view>
-        <button wx:if="{{!hasExistingOrder}}" class="btn ghost mini" bindtap="goAddressBook">管理地址</button>
+        <view class="row-tail" wx:if="{{!hasExistingOrder}}">
+          <button class="btn ghost mini addr-manage-btn" bindtap="goAddressBook">管理地址</button>
+        </view>
       </view>
       <view wx:if="{{hasExistingOrder}}">
         <view class="picker" wx:if="{{selectedAddressTitle}}">当前地址：{{selectedAddressTitle}}（已锁定）</view>
@@ -61,6 +63,18 @@
         <view class="picker" wx:else>当前地址：请选择地址</view>
       </picker>
       <view class="muted small" wx:if="{{selectedAddressDetail}}">{{selectedAddressDetail}}</view>
+      <view class="confirm-box" wx:if="{{showDeliveryConfirmCard}}">
+        <view class="confirm-title">请核对配送信息</view>
+        <view class="confirm-row" wx:if="{{selectedAddressDetail || selectedAddressTitle}}">
+          <text class="confirm-label">配送地址：</text>
+          <text class="confirm-value">{{selectedAddressDetail || selectedAddressTitle}}</text>
+        </view>
+        <view class="confirm-row">
+          <text class="confirm-label">配送联系电话：</text>
+          <text class="confirm-value confirm-phone">{{selectedAddressPhoneText || '未填写'}}</text>
+        </view>
+        <view class="confirm-tip">配送将使用该地址中的联系电话，请确认号码可接听。</view>
+      </view>
       <view class="muted small" wx:if="{{fulfillmentType==='delivery' && minOrderText}}">{{minOrderText}}</view>
       <view class="warn-text small" wx:if="{{fulfillmentType==='delivery' && minOrderHint}}">{{minOrderHint}}</view>
     </view>

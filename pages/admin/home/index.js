@@ -13,6 +13,101 @@ function saleStatusText(status) {
   return v || '未知'
 }
 
+function buildBaseActiveSaleDetailPatch() {
+  return {
+    pendingReviewCount: 0,
+    activeSaleDishStats: [],
+    activeSaleRevenueCents: 0,
+    activeSaleRevenueEuro: '0.00',
+    activeSaleOpsSummary: null,
+    canCompleteActiveSale: false,
+    activeSaleIncompleteReason: null,
+  }
+}
+
+function buildHydratedActiveSaleFromSnapshot(rawSale) {
+  const sale = rawSale || null
+  const saleStatus = String((sale && sale.status) || '').trim()
+  const isCurrentSale = saleStatus === 'OPEN' || saleStatus === 'CLOSED' || saleStatus === 'FULFILLING'
+  if (!isCurrentSale) return null
+  return {
+    _id: String(sale.saleId || sale._id || ''),
+    status: saleStatus,
+    statusText: saleStatusText(saleStatus),
+    deliveryTimeSlotLabel: String(sale.deliveryTimeSlotLabel || ''),
+  }
+}
+
+function buildHydrateSnapshotPatch(snapshot) {
+  const sale = snapshot && snapshot.sale
+  if (!sale) return null
+  return {
+    activeSale: buildHydratedActiveSaleFromSnapshot(sale),
+    ...buildBaseActiveSaleDetailPatch(),
+    saleKnown: true,
+  }
+}
+
+function buildAuthStatePatch(sess) {
+  return {
+    authKnown: true,
+    isAdmin: !!(sess && sess.isAdmin),
+    myOpenId: String((sess && sess.openId) || ''),
+  }
+}
+
+function buildNonAdminHomePatch() {
+  return {
+    activeSale: null,
+    stats: { orderCount: 0 },
+    ...buildBaseActiveSaleDetailPatch(),
+    saleKnown: true,
+  }
+}
+
+function normalizeDashboardActiveSale(activeSaleRaw) {
+  if (!activeSaleRaw) return null
+  return {
+    ...activeSaleRaw,
+    statusText: saleStatusText(activeSaleRaw.status),
+  }
+}
+
+function buildDashboardSuccessPatch(rawData) {
+  const data = rawData || {}
+  return {
+    activeSale: normalizeDashboardActiveSale(data.activeSale || null),
+    stats: data.stats || { orderCount: 0 },
+    pendingReviewCount: Number(data.pendingReviewCount || 0),
+    activeSaleRevenueCents: Number(data.activeSaleRevenueCents || 0),
+    activeSaleRevenueEuro: String(data.activeSaleRevenueEuro || '0.00'),
+    activeSaleDishStats: Array.isArray(data.activeSaleDishStats) ? data.activeSaleDishStats : [],
+    activeSaleOpsSummary: data.activeSaleOpsSummary || null,
+    canCompleteActiveSale: !!data.canCompleteActiveSale,
+    activeSaleIncompleteReason: data.activeSaleIncompleteReason || null,
+    saleKnown: true,
+  }
+}
+
+function setAdminHomeRefresherTriggered(page, silent, triggered) {
+  if (silent) return
+  page.setData({ refresherTriggered: !!triggered })
+}
+
+function toggleBooleanData(page, key) {
+  page.setData({ [key]: !page.data[key] })
+}
+
+function showModalAsync(options) {
+  return new Promise((resolve) => {
+    wx.showModal({
+      ...options,
+      success: resolve,
+      fail: () => resolve({ confirm: false }),
+    })
+  })
+}
+
 const FORCE_STATUS_OPTIONS = [
   { label: '改为 开单中（OPEN）', value: 'OPEN' },
   { label: '改为 已截单（CLOSED）', value: 'CLOSED' },
@@ -59,80 +154,31 @@ createPage({
   },
 
   hydrateFromSnapshot() {
-    const snapshot = getSnapshot()
-    const sale = snapshot && snapshot.sale
-    if (!sale) return
-    const saleStatus = String((sale && sale.status) || '').trim()
-    const isCurrentSale = saleStatus === 'OPEN' || saleStatus === 'CLOSED' || saleStatus === 'FULFILLING'
-    this.setData({
-      activeSale: isCurrentSale
-        ? {
-            _id: String(sale.saleId || sale._id || ''),
-            status: saleStatus,
-            statusText: saleStatusText(saleStatus),
-            deliveryTimeSlotLabel: String(sale.deliveryTimeSlotLabel || ''),
-          }
-        : null,
-      activeSaleDishStats: [],
-      pendingReviewCount: 0,
-      activeSaleRevenueCents: 0,
-      activeSaleRevenueEuro: '0.00',
-      activeSaleOpsSummary: null,
-      canCompleteActiveSale: false,
-      activeSaleIncompleteReason: null,
-      saleKnown: true,
-    })
+    const patch = buildHydrateSnapshotPatch(getSnapshot())
+    if (!patch) return
+    this.setData(patch)
   },
 
   async reload(options = {}) {
     const silent = !!options.silent
-    if (!silent) this.setData({ refresherTriggered: true })
+    setAdminHomeRefresherTriggered(this, silent, true)
     try {
       const sess = await getSession()
-      const isAdmin = !!sess.isAdmin
-      const myOpenId = sess.openId || ''
-      this.setData({ authKnown: true, isAdmin, myOpenId })
-      if (!isAdmin) {
-        this.setData({
-          activeSale: null,
-          stats: { orderCount: 0 },
-          pendingReviewCount: 0,
-          activeSaleDishStats: [],
-          activeSaleRevenueCents: 0,
-          activeSaleRevenueEuro: '0.00',
-          activeSaleOpsSummary: null,
-          canCompleteActiveSale: false,
-          activeSaleIncompleteReason: null,
-          saleKnown: true,
-        })
+      const authPatch = buildAuthStatePatch(sess)
+      this.setData(authPatch)
+      if (!authPatch.isAdmin) {
+        this.setData(buildNonAdminHomePatch())
         return
       }
 
       const dashRes = await call('admin', 'getDashboard')
       if (dashRes.ok) {
-        const activeSaleRaw = dashRes.data.activeSale || null
-        this.setData({
-          activeSale: activeSaleRaw
-            ? {
-                ...activeSaleRaw,
-                statusText: saleStatusText(activeSaleRaw.status),
-              }
-            : null,
-          stats: dashRes.data.stats || { orderCount: 0 },
-          pendingReviewCount: Number(dashRes.data.pendingReviewCount || 0),
-          activeSaleRevenueCents: Number(dashRes.data.activeSaleRevenueCents || 0),
-          activeSaleRevenueEuro: String(dashRes.data.activeSaleRevenueEuro || '0.00'),
-          activeSaleDishStats: Array.isArray(dashRes.data.activeSaleDishStats) ? dashRes.data.activeSaleDishStats : [],
-          activeSaleOpsSummary: dashRes.data.activeSaleOpsSummary || null,
-          canCompleteActiveSale: !!dashRes.data.canCompleteActiveSale,
-          activeSaleIncompleteReason: dashRes.data.activeSaleIncompleteReason || null,
-          saleKnown: true,
-        })
+        this.setData(buildDashboardSuccessPatch(dashRes.data))
       } else if (!this.data.saleKnown) {
         this.setData({ saleKnown: true })
       }
     } finally {
-      if (!silent) this.setData({ refresherTriggered: false })
+      setAdminHomeRefresherTriggered(this, silent, false)
     }
   },
 
@@ -147,15 +193,15 @@ createPage({
   },
 
   toggleOpenSalesListCollapsed() {
-    this.setData({ openSalesListCollapsed: !this.data.openSalesListCollapsed })
+    toggleBooleanData(this, 'openSalesListCollapsed')
   },
 
   toggleClosedProductionItemsCollapsed() {
-    this.setData({ closedProductionItemsCollapsed: !this.data.closedProductionItemsCollapsed })
+    toggleBooleanData(this, 'closedProductionItemsCollapsed')
   },
 
   toggleFulfillingProductionItemsCollapsed() {
-    this.setData({ fulfillingProductionItemsCollapsed: !this.data.fulfillingProductionItemsCollapsed })
+    toggleBooleanData(this, 'fulfillingProductionItemsCollapsed')
   },
 
   goDishes() {
@@ -218,13 +264,9 @@ createPage({
         const idx = Number(res && res.tapIndex)
         const picked = FORCE_STATUS_OPTIONS[idx]
         if (!picked) return
-        const modalRes = await new Promise((resolve) => {
-          wx.showModal({
-            title: '调试修改开单状态',
-            content: `将当前开单状态强制改为：${saleStatusText(picked.value)}（不做业务校验）`,
-            success: resolve,
-            fail: () => resolve({ confirm: false }),
-          })
+        const modalRes = await showModalAsync({
+          title: '调试修改开单状态',
+          content: `将当前开单状态强制改为：${saleStatusText(picked.value)}（不做业务校验）`,
         })
         if (!modalRes.confirm) return
         const callRes = await call('admin', 'forceSetCurrentSaleStatus', {
@@ -253,13 +295,9 @@ createPage({
         let res = await call('admin', 'closeSale', { saleId: sale._id })
         if (!res.ok && res.code === 'PENDING_REVIEW_EXISTS') {
           const pendingReviewCount = Number((res.detail && res.detail.pendingReviewCount) || 0)
-          const warnRes = await new Promise((resolve) => {
-            wx.showModal({
-              title: '有待确认订单',
-              content: `当前有 ${pendingReviewCount} 笔待确认订单。截单后仍可继续确认（也可留到下次开单时顺延处理）。是否继续截单？`,
-              success: resolve,
-              fail: () => resolve({ confirm: false }),
-            })
+          const warnRes = await showModalAsync({
+            title: '有待确认订单',
+            content: `当前有 ${pendingReviewCount} 笔待确认订单。截单后仍可继续确认（也可留到下次开单时顺延处理）。是否继续截单？`,
           })
           if (!warnRes.confirm) return
           res = await call('admin', 'closeSale', { saleId: sale._id, ignorePendingReviewWarning: true })
@@ -278,13 +316,9 @@ createPage({
   async completeActiveSale() {
     const sale = this.data.activeSale
     if (!sale || String(sale.status || '') !== 'FULFILLING' || this.data.completingActiveSale) return
-    const modalRes = await new Promise((resolve) => {
-      wx.showModal({
-        title: '完成本次开单',
-        content: '仅当所有有效订单（配送+自取）都已交付且已收款时才能完成。',
-        success: resolve,
-        fail: () => resolve({ confirm: false }),
-      })
+    const modalRes = await showModalAsync({
+      title: '完成本次开单',
+      content: '仅当所有有效订单（配送+自取）都已交付且已收款时才能完成。',
     })
     if (!modalRes.confirm) return
     this.setData({ completingActiveSale: true })

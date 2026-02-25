@@ -69,6 +69,30 @@ function sameItemsPayload(a, b) {
   return true
 }
 
+function getSafePickerIndex(rawValue, options) {
+  const idx = Number(rawValue || 0)
+  const len = Array.isArray(options) ? options.length : 0
+  if (len <= 0) return 0
+  return Number.isFinite(idx) && idx >= 0 && idx < len ? idx : 0
+}
+
+function setEditableItemsState(page, editableItems) {
+  page.setData({
+    editableItems,
+    editableTotals: calcEditableTotals(editableItems),
+  })
+}
+
+function toDishPickerOption(d) {
+  return {
+    _id: String((d && d._id) || ''),
+    name: String((d && d.name) || '').trim(),
+    priceCents: Number((d && d.priceCents) || 0),
+    priceEuro: ((Number((d && d.priceCents) || 0) || 0) / 100).toFixed(2),
+    isActive: !!(d && d.isActive),
+  }
+}
+
 function normalizeManualAddress(input) {
   const normalized = normalizeFrAddress(input) || {}
   return {
@@ -208,8 +232,7 @@ createPage({
   noop() {},
 
   onPickPaymentMethod(e) {
-    const idx = Number((e && e.detail && e.detail.value) || 0)
-    const safeIdx = Number.isFinite(idx) && idx >= 0 && idx < PAYMENT_METHOD_OPTIONS.length ? idx : 0
+    const safeIdx = getSafePickerIndex(e && e.detail && e.detail.value, PAYMENT_METHOD_OPTIONS)
     const picked = PAYMENT_METHOD_OPTIONS[safeIdx]
     this.setData({
       paymentMethodIndex: safeIdx,
@@ -218,8 +241,7 @@ createPage({
   },
 
   onPickPaidStatus(e) {
-    const idx = Number((e && e.detail && e.detail.value) || 0)
-    const safeIdx = Number.isFinite(idx) && idx >= 0 && idx < PAID_STATUS_OPTIONS.length ? idx : 0
+    const safeIdx = getSafePickerIndex(e && e.detail && e.detail.value, PAID_STATUS_OPTIONS)
     const picked = PAID_STATUS_OPTIONS[safeIdx]
     this.setData({
       paidStatusIndex: safeIdx,
@@ -228,8 +250,7 @@ createPage({
   },
 
   onPickHandoffStatus(e) {
-    const idx = Number((e && e.detail && e.detail.value) || 0)
-    const safeIdx = Number.isFinite(idx) && idx >= 0 && idx < HANDOFF_STATUS_OPTIONS.length ? idx : 0
+    const safeIdx = getSafePickerIndex(e && e.detail && e.detail.value, HANDOFF_STATUS_OPTIONS)
     const picked = HANDOFF_STATUS_OPTIONS[safeIdx]
     this.setData({
       handoffStatusIndex: safeIdx,
@@ -248,13 +269,7 @@ createPage({
         return
       }
       const allDishesForPick = Array.isArray(res.data && res.data.dishes)
-        ? res.data.dishes.map((d) => ({
-            _id: String((d && d._id) || ''),
-            name: String((d && d.name) || '').trim(),
-            priceCents: Number((d && d.priceCents) || 0),
-            priceEuro: ((Number((d && d.priceCents) || 0) || 0) / 100).toFixed(2),
-            isActive: !!(d && d.isActive),
-          }))
+        ? res.data.dishes.map((d) => toDishPickerOption(d))
         : []
       this.setData({ allDishesForPick })
     }
@@ -293,11 +308,8 @@ createPage({
         lineTotalEuro: picked.priceEuro,
       })
     }
-    this.setData({
-      showDishPicker: false,
-      editableItems,
-      editableTotals: calcEditableTotals(editableItems),
-    })
+    this.setData({ showDishPicker: false })
+    setEditableItemsState(this, editableItems)
   },
 
   async savePaymentAndProgressDraft() {
@@ -350,10 +362,7 @@ createPage({
     const delta = Number(e.detail && e.detail.delta)
     if (!dishId || !Number.isFinite(delta)) return
     const editableItems = applyQtyDelta(this.data.editableItems, dishId, delta)
-    this.setData({
-      editableItems,
-      editableTotals: calcEditableTotals(editableItems),
-    })
+    setEditableItemsState(this, editableItems)
   },
 
   onRemoveItem(e) {
@@ -361,10 +370,7 @@ createPage({
     const dishId = String((e.detail && e.detail.dishId) || '').trim()
     if (!dishId) return
     const editableItems = removeDish(this.data.editableItems, dishId)
-    this.setData({
-      editableItems,
-      editableTotals: calcEditableTotals(editableItems),
-    })
+    setEditableItemsState(this, editableItems)
   },
 
   async onSaveItems() {
@@ -533,24 +539,24 @@ createPage({
         : { mode: 'manual', addressId: '', address: normalizeManualAddress(order && order.address) }
     )
     if (nextType === 'delivery') {
-        if (!nextPhone || !isPhoneValid(nextPhone)) {
-          wx.showToast({ title: '配送单需有效电话', icon: 'none' })
+      if (!nextPhone || !isPhoneValid(nextPhone)) {
+        wx.showToast({ title: '配送单需有效电话', icon: 'none' })
+        return { ok: false, changed: false }
+      }
+      if (this.data.addressMode === 'saved') {
+        const addressId = String(this.data.selectedAddressId || '').trim()
+        if (!addressId) {
+          wx.showToast({ title: '请选择客户地址', icon: 'none' })
           return { ok: false, changed: false }
         }
-        if (this.data.addressMode === 'saved') {
-        const addressId = String(this.data.selectedAddressId || '').trim()
-          if (!addressId) {
-            wx.showToast({ title: '请选择客户地址', icon: 'none' })
-            return { ok: false, changed: false }
-          }
         payload.addressId = addressId
         nextAddressCompareKey = JSON.stringify({ mode: 'saved', addressId, address: null })
-        } else {
-          const manualAddress = normalizeManualAddress(this.data.manualAddress)
-          if (!isManualAddressValid(manualAddress)) {
-            wx.showToast({ title: '请填写完整法国地址', icon: 'none' })
-            return { ok: false, changed: false }
-          }
+      } else {
+        const manualAddress = normalizeManualAddress(this.data.manualAddress)
+        if (!isManualAddressValid(manualAddress)) {
+          wx.showToast({ title: '请填写完整法国地址', icon: 'none' })
+          return { ok: false, changed: false }
+        }
         payload.address = manualAddress
         nextAddressCompareKey = JSON.stringify({ mode: 'manual', addressId: '', address: manualAddress })
       }

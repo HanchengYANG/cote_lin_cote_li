@@ -35,15 +35,250 @@ function normalizeCartItems(input) {
   return out
 }
 
+function hasAddressId(addresses, id) {
+  const arr = Array.isArray(addresses) ? addresses : []
+  const target = String(id || '')
+  return arr.some((x) => String((x && x.id) || '') === target)
+}
+
+function getFirstAddressId(addresses) {
+  const arr = Array.isArray(addresses) ? addresses : []
+  return String((arr[0] && arr[0].id) || '')
+}
+
+function recalcLinesAndApplyCheckoutView(page) {
+  page.recalcLines()
+  page.applyCheckoutViewModel()
+}
+
+function setDataAndApplyCheckoutView(page, patch) {
+  page.setData(patch)
+  page.applyCheckoutViewModel()
+}
+
+function resolveEffectiveFulfillmentType(data) {
+  const lockedType = String((data && data.existingOrderFulfillmentType) || '').trim()
+  return data && data.hasExistingOrder && lockedType ? lockedType : (data && data.fulfillmentType)
+}
+
+function resolveEffectiveAddressId(data, effectiveType) {
+  const lockedAddressId = String((data && data.existingOrderAddressId) || '').trim()
+  if (effectiveType !== 'delivery') return ''
+  return data && data.hasExistingOrder && lockedAddressId ? lockedAddressId : (data && data.selectedAddressId)
+}
+
+function buildCreateOrderPayload(data) {
+  const paymentMethod = PAYMENT_METHODS[data.paymentMethodIndex].value
+  const effectiveType = resolveEffectiveFulfillmentType(data)
+  const effectiveAddressId = resolveEffectiveAddressId(data, effectiveType)
+  return {
+    saleId: data.sale && data.sale._id,
+    fulfillmentType: effectiveType,
+    addressId: effectiveAddressId,
+    phone: effectiveType === 'pickup' ? normalizePhone(data.pickupPhone) : '',
+    acceptDeliverySlot: effectiveType === 'delivery' ? !!data.acceptDeliverySlot : false,
+    items: (data.cartItems || []).map((it) => ({ dishId: it.dishId, qty: Number(it.qty || 0) })),
+    payment: { method: paymentMethod },
+    remark: String(data.remark || '').trim(),
+  }
+}
+
+function decorateCheckoutAddress(a) {
+  if (!a) return null
+  const title = String(a.label || '').trim() || `${String(a.line1 || '').trim()} ${String(a.city || '').trim()}`.trim()
+  const detail = [a.line1, a.line2, a.postalCode, a.city, a.country].filter(Boolean).join(', ')
+  return { ...a, title, detail }
+}
+
+function buildDecoratedCheckoutAddresses(rawAddresses) {
+  const arr = Array.isArray(rawAddresses) ? rawAddresses : []
+  return arr.map((a) => decorateCheckoutAddress(a)).filter(Boolean)
+}
+
+function buildDishesByIdMap(input) {
+  const dishes = Array.isArray(input) ? input : []
+  const dishesById = {}
+  for (const d of dishes) {
+    if (d && d._id) dishesById[d._id] = d
+  }
+  return dishesById
+}
+
+function resolveSelectedAddressIdWhenSaleUnavailable(options = {}) {
+  const addresses = options.addresses
+  let selectedAddressId = String(options.currentSelectedAddressId || '').trim()
+  const lockedAddressId =
+    options.hasExistingOrder && String(options.fulfillmentType || '') === 'delivery'
+      ? String(options.existingOrderAddressId || '').trim()
+      : ''
+  const preferredAddressId = String(options.preferredAddressId || '').trim()
+
+  if (lockedAddressId && hasAddressId(addresses, lockedAddressId)) {
+    selectedAddressId = lockedAddressId
+  } else if (preferredAddressId && hasAddressId(addresses, preferredAddressId)) {
+    selectedAddressId = preferredAddressId
+  }
+  if (!hasAddressId(addresses, selectedAddressId)) selectedAddressId = String(options.profileDefaultAddressId || '')
+  if (!hasAddressId(addresses, selectedAddressId)) selectedAddressId = getFirstAddressId(addresses)
+  return selectedAddressId
+}
+
+function resolveSelectedAddressIdWhenSaleOpen(options = {}) {
+  const addresses = options.addresses
+  let selectedAddressId = String(options.currentSelectedAddressId || '').trim()
+  const preferredAddressId = String(options.preferredAddressId || '').trim()
+  const existingOrderAddressId = String(options.existingOrderAddressId || '')
+
+  if (!hasAddressId(addresses, selectedAddressId)) selectedAddressId = ''
+  if (existingOrderAddressId) {
+    selectedAddressId = existingOrderAddressId
+  } else if (preferredAddressId && hasAddressId(addresses, preferredAddressId)) {
+    selectedAddressId = preferredAddressId
+  }
+  if (!selectedAddressId) selectedAddressId = String(options.profileDefaultAddressId || '')
+  if (!hasAddressId(addresses, selectedAddressId)) selectedAddressId = getFirstAddressId(addresses)
+  return selectedAddressId
+}
+
+function resolveReloadSaleState(options = {}) {
+  const currentData = options.currentData || {}
+  const skipSaleFetch = !!options.skipSaleFetch
+  const saleRes = options.saleRes || null
+
+  let saleStatus = String(currentData.saleStatus || 'closed')
+  let sale = currentData.sale || null
+  let dishesById = currentData.dishesById || {}
+  let cartItems = normalizeCartItems(currentData.cartItems)
+  let removedCount = 0
+
+  if (!skipSaleFetch) {
+    if (saleRes && saleRes.ok) {
+      if (!saleRes.data || !saleRes.data.sale) {
+        saleStatus = 'closed'
+        sale = null
+        dishesById = {}
+      } else {
+        saleStatus = 'open'
+        sale = saleRes.data.sale
+        const dishes = Array.isArray(saleRes.data.dishes) ? saleRes.data.dishes : []
+        const allowedSet = new Set((sale.dishIds || []).filter(Boolean))
+        dishesById = buildDishesByIdMap(dishes)
+        const prevItems = normalizeCartItems(currentData.cartItems)
+        cartItems = prevItems.filter((it) => allowedSet.has(it.dishId))
+        removedCount = prevItems.length - cartItems.length
+      }
+    } else {
+      // 拉取失败时沿用当前页状态，避免 UI 闪成“未开单”。
+      saleStatus = String(currentData.saleStatus || 'closed')
+      sale = currentData.sale || null
+      dishesById = currentData.dishesById || {}
+      cartItems = normalizeCartItems(currentData.cartItems)
+    }
+  }
+
+  return {
+    saleStatus,
+    sale,
+    dishesById,
+    cartItems,
+    removedCount,
+  }
+}
+
+function buildReloadPatchWhenSaleUnavailable(options = {}) {
+  const currentData = options.currentData || {}
+  const profile = options.profile || {}
+  const addresses = options.addresses
+  const selectedAddressId = resolveSelectedAddressIdWhenSaleUnavailable({
+    addresses,
+    currentSelectedAddressId: currentData.selectedAddressId,
+    hasExistingOrder: currentData.hasExistingOrder,
+    fulfillmentType: currentData.fulfillmentType,
+    existingOrderAddressId: currentData.existingOrderAddressId,
+    preferredAddressId: options.preferredAddressId,
+    profileDefaultAddressId: profile.defaultAddressId,
+  })
+  const pickupPhone = normalizePhone(currentData.pickupPhone || '') || normalizePhone(profile && profile.profilePhone)
+  return {
+    saleStatus: options.saleStatus,
+    sale: options.sale,
+    hasExistingOrder: false,
+    existingOrderLocked: false,
+    existingOrderAmountCents: 0,
+    existingOrderFulfillmentType: '',
+    existingOrderAddressId: '',
+    dishesById: options.dishesById || {},
+    cartItems: options.cartItems || [],
+    profile,
+    addresses,
+    selectedAddressId,
+    pickupPhone,
+  }
+}
+
+function buildReloadPatchWhenSaleOpen(options = {}) {
+  const currentData = options.currentData || {}
+  const profile = options.profile || {}
+  const addresses = options.addresses
+  const existingOrder = options.existingOrder || null
+  const selectedAddressId = resolveSelectedAddressIdWhenSaleOpen({
+    addresses,
+    currentSelectedAddressId: currentData.selectedAddressId,
+    existingOrderAddressId: existingOrder && existingOrder.addressId,
+    preferredAddressId: options.preferredAddressId,
+    profileDefaultAddressId: profile.defaultAddressId,
+  })
+
+  const next = {
+    saleStatus: 'open',
+    sale: options.sale,
+    dishesById: options.dishesById || {},
+    cartItems: options.cartItems || [],
+    hasExistingOrder: !!existingOrder,
+    existingOrderLocked: !!(existingOrder && existingOrder.customerLocked),
+    existingOrderAmountCents: Number((existingOrder && existingOrder.totals && existingOrder.totals.amountCents) || 0),
+    existingOrderFulfillmentType: String((existingOrder && existingOrder.fulfillmentType) || ''),
+    existingOrderAddressId: String((existingOrder && existingOrder.addressId) || ''),
+    profile,
+    addresses,
+    selectedAddressId,
+  }
+
+  const selectedAddr = (Array.isArray(addresses) ? addresses : []).find((x) => x.id === selectedAddressId) || null
+  let pickupPhone = normalizePhone(currentData.pickupPhone || '') || normalizePhone(profile && profile.profilePhone)
+  if (!pickupPhone && selectedAddr && selectedAddr.phone) pickupPhone = normalizePhone(selectedAddr.phone)
+
+  if (existingOrder) {
+    const method = String((existingOrder.payment && existingOrder.payment.method) || 'cash')
+    const methodIdx = findPaymentMethodIndex(method)
+    next.fulfillmentType = existingOrder.fulfillmentType || 'delivery'
+    next.acceptDeliverySlot = existingOrder.fulfillmentType === 'delivery'
+    next.paymentMethodIndex = methodIdx
+    next.paymentMethodLabel = PAYMENT_METHODS[methodIdx].label
+    next.remark = String(existingOrder.remark || '')
+    if (next.fulfillmentType === 'pickup') {
+      pickupPhone = normalizePhone(existingOrder && existingOrder.contact && existingOrder.contact.phone)
+    }
+  } else if ((addresses || []).length === 0) {
+    next.fulfillmentType = 'pickup'
+    next.acceptDeliverySlot = false
+  }
+
+  next.pickupPhone = pickupPhone
+  return next
+}
+
 function buildSelectedAddressView(data) {
   const arr = Array.isArray(data && data.addresses) ? data.addresses : []
   const currentId = String((data && data.selectedAddressId) || '').trim()
   const idx = arr.findIndex((x) => String((x && x.id) || '').trim() === currentId)
   const picked = idx >= 0 ? arr[idx] : null
+  const phoneText = picked ? normalizePhone(picked.phone || '') : ''
   return {
     selectedAddressIndex: idx >= 0 ? idx : 0,
     selectedAddressTitle: picked ? String(picked.title || '') : '',
     selectedAddressDetail: picked ? String(picked.detail || '') : '',
+    selectedAddressPhoneText: phoneText,
     selectedAddress: picked || null,
   }
 }
@@ -110,10 +345,16 @@ function buildCheckoutViewModel(data) {
   const selected = buildSelectedAddressView(data)
   const idx = Number((data && data.paymentMethodIndex) || 0)
   const safeIdx = idx >= 0 && idx < PAYMENT_METHODS.length ? idx : 0
+  const isDelivery = String((data && data.fulfillmentType) || '') === 'delivery'
+  const showDeliveryConfirmCard = !!(
+    isDelivery && (selected.selectedAddressDetail || selected.selectedAddressPhoneText || selected.selectedAddressTitle)
+  )
   return {
     selectedAddressIndex: selected.selectedAddressIndex,
     selectedAddressTitle: selected.selectedAddressTitle,
     selectedAddressDetail: selected.selectedAddressDetail,
+    selectedAddressPhoneText: selected.selectedAddressPhoneText,
+    showDeliveryConfirmCard,
     paymentMethodLabel: PAYMENT_METHODS[safeIdx].label,
     ...buildAddressRuleView(data, selected.selectedAddress),
     ...buildSubmitState(data, selected.selectedAddress),
@@ -142,6 +383,8 @@ createPage({
     selectedAddressIndex: 0,
     selectedAddressTitle: '',
     selectedAddressDetail: '',
+    selectedAddressPhoneText: '',
+    showDeliveryConfirmCard: false,
 
     fulfillmentType: 'delivery',
     acceptDeliverySlot: false,
@@ -194,11 +437,7 @@ createPage({
     const snapshot = getSnapshot()
     if (!snapshot || !snapshot.sale) return false
     const snapSale = snapshot.sale
-    const dishes = Array.isArray(snapshot.dishes) ? snapshot.dishes : []
-    const dishesById = {}
-    for (const d of dishes) {
-      if (d && d._id) dishesById[d._id] = d
-    }
+    const dishesById = buildDishesByIdMap(snapshot.dishes)
     const saleStatusRaw = String((snapSale && snapSale.status) || '').trim()
     const isOpen = saleStatusRaw === 'OPEN'
     const sale = isOpen
@@ -213,8 +452,7 @@ createPage({
       sale,
       dishesById,
     })
-    this.recalcLines()
-    this.applyCheckoutViewModel()
+    recalcLinesAndApplyCheckoutView(this)
     return true
   },
 
@@ -225,19 +463,8 @@ createPage({
     })
   },
 
-  getAddressById(id) {
-    return (this.data.addresses || []).find((x) => x.id === id) || null
-  },
-
   applyCheckoutViewModel() {
     this.setData(buildCheckoutViewModel(this.data))
-  },
-
-  decorateAddress(a) {
-    if (!a) return null
-    const title = String(a.label || '').trim() || `${String(a.line1 || '').trim()} ${String(a.city || '').trim()}`.trim()
-    const detail = [a.line1, a.line2, a.postalCode, a.city, a.country].filter(Boolean).join(', ')
-    return { ...a, title, detail }
   },
 
   async reload(options = {}) {
@@ -252,6 +479,13 @@ createPage({
       if (this.data.loadPhase !== 'ready') {
         this.setData({ loadPhase: 'ready' })
       }
+    }
+    const finishReloadUi = () => {
+      finishLoadPhase()
+      if (!silent) this.setData({ refresherTriggered: false })
+    }
+    const clearPreferredAddressSelection = () => {
+      if (preferredAddressId) wx.removeStorageSync('checkout_selected_address_id')
     }
     if (this.data.loadPhase !== 'ready') this.setData({ loadPhase: 'loading' })
     if (!silent) {
@@ -268,143 +502,63 @@ createPage({
     const profileRes = await call('customer', 'getMyProfile')
     if (isStale()) return
     if (!profileRes || !profileRes.ok || !profileRes.data || !profileRes.data.profile) {
-      finishLoadPhase()
-      if (!silent) this.setData({ refresherTriggered: false })
+      finishReloadUi()
       wx.showToast({ title: '资料加载失败', icon: 'none' })
       return
     }
 
     const profile = profileRes.data.profile
-    const profilePhone = normalizePhone(profile && profile.profilePhone)
-    const rawAddresses = Array.isArray(profile.addresses) ? profile.addresses : []
-    const addresses = rawAddresses.map((a) => this.decorateAddress(a)).filter(Boolean)
-
-    let saleStatus = String(this.data.saleStatus || 'closed')
-    let sale = this.data.sale || null
-    let dishesById = this.data.dishesById || {}
-    let cartItems = normalizeCartItems(this.data.cartItems)
-    if (!skipSaleFetch) {
-      if (saleRes && saleRes.ok) {
-        if (!saleRes.data || !saleRes.data.sale) {
-          saleStatus = 'closed'
-          sale = null
-          dishesById = {}
-        } else {
-          saleStatus = 'open'
-          sale = saleRes.data.sale
-          const dishes = Array.isArray(saleRes.data.dishes) ? saleRes.data.dishes : []
-          const allowedSet = new Set((sale.dishIds || []).filter(Boolean))
-          dishesById = {}
-          for (const d of dishes) dishesById[d._id] = d
-          const prevItems = normalizeCartItems(this.data.cartItems)
-          cartItems = prevItems.filter((it) => allowedSet.has(it.dishId))
-          const removedCount = prevItems.length - cartItems.length
-          if (removedCount > 0) {
-            wx.showToast({ title: `已移除 ${removedCount} 个非本次开单菜品`, icon: 'none', __forceToast: true })
-          }
-        }
-      } else {
-        // 拉取失败时沿用当前页状态，避免 UI 闪成“未开单”。
-        saleStatus = String(this.data.saleStatus || 'closed')
-        sale = this.data.sale || null
-        dishesById = this.data.dishesById || {}
-        cartItems = normalizeCartItems(this.data.cartItems)
-      }
+    const addresses = buildDecoratedCheckoutAddresses(profile && profile.addresses)
+    const saleState = resolveReloadSaleState({
+      currentData: this.data,
+      skipSaleFetch,
+      saleRes,
+    })
+    const { saleStatus, sale, dishesById, cartItems, removedCount } = saleState
+    if (removedCount > 0) {
+      wx.showToast({ title: `已移除 ${removedCount} 个非本次开单菜品`, icon: 'none', __forceToast: true })
     }
 
     if (saleStatus !== 'open' || !sale || !sale._id) {
-      let selectedAddressId = String(this.data.selectedAddressId || '').trim()
-      const lockedAddressId =
-        this.data.hasExistingOrder && this.data.fulfillmentType === 'delivery'
-          ? String(this.data.existingOrderAddressId || '').trim()
-          : ''
-      if (lockedAddressId && addresses.some((x) => x.id === lockedAddressId)) {
-        selectedAddressId = lockedAddressId
-      } else if (preferredAddressId && addresses.some((x) => x.id === preferredAddressId)) {
-        selectedAddressId = preferredAddressId
-      }
-      if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = String(profile.defaultAddressId || '')
-      if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = String((addresses[0] && addresses[0].id) || '')
-      const pickupPhone = normalizePhone(this.data.pickupPhone || '') || profilePhone
-      this.setData({
+      const patch = buildReloadPatchWhenSaleUnavailable({
+        currentData: this.data,
         saleStatus,
         sale,
-        hasExistingOrder: false,
-        existingOrderLocked: false,
-        existingOrderAmountCents: 0,
-        existingOrderFulfillmentType: '',
-        existingOrderAddressId: '',
         dishesById,
         cartItems,
         profile,
         addresses,
-        selectedAddressId,
-        pickupPhone,
+        preferredAddressId,
       })
-      if (preferredAddressId) wx.removeStorageSync('checkout_selected_address_id')
+      this.setData(patch)
+      clearPreferredAddressSelection()
       this.applyCheckoutViewModel()
-      this.recalcLines()
-      this.applyCheckoutViewModel()
-      finishLoadPhase()
-      if (!silent) this.setData({ refresherTriggered: false })
+      recalcLinesAndApplyCheckoutView(this)
+      finishReloadUi()
       return
     }
 
     let existingOrder = null
     const orderRes = await call('customer', 'getMySaleOrder', { saleId: sale._id })
+    if (isStale()) return
     if (orderRes.ok && orderRes.data && orderRes.data.order) existingOrder = orderRes.data.order
 
-    let selectedAddressId = String(this.data.selectedAddressId || '').trim()
-    if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = ''
-    if (existingOrder && existingOrder.addressId) {
-      selectedAddressId = String(existingOrder.addressId)
-    } else if (preferredAddressId && addresses.some((x) => x.id === preferredAddressId)) {
-      selectedAddressId = preferredAddressId
-    }
-    if (!selectedAddressId) selectedAddressId = String(profile.defaultAddressId || '')
-    if (!addresses.some((x) => x.id === selectedAddressId)) selectedAddressId = String((addresses[0] && addresses[0].id) || '')
-
-    const next = {
-      saleStatus: 'open',
+    const patch = buildReloadPatchWhenSaleOpen({
+      currentData: this.data,
       sale,
       dishesById,
       cartItems,
-      hasExistingOrder: !!existingOrder,
-      existingOrderLocked: !!(existingOrder && existingOrder.customerLocked),
-      existingOrderAmountCents: Number((existingOrder && existingOrder.totals && existingOrder.totals.amountCents) || 0),
-      existingOrderFulfillmentType: String((existingOrder && existingOrder.fulfillmentType) || ''),
-      existingOrderAddressId: String((existingOrder && existingOrder.addressId) || ''),
       profile,
       addresses,
-      selectedAddressId,
-    }
-    const selectedAddr = addresses.find((x) => x.id === selectedAddressId) || null
-    let pickupPhone = normalizePhone(this.data.pickupPhone || '') || profilePhone
-    if (!pickupPhone && selectedAddr && selectedAddr.phone) pickupPhone = normalizePhone(selectedAddr.phone)
-    if (existingOrder) {
-      const method = String((existingOrder.payment && existingOrder.payment.method) || 'cash')
-      const methodIdx = findPaymentMethodIndex(method)
-      next.fulfillmentType = existingOrder.fulfillmentType || 'delivery'
-      next.acceptDeliverySlot = existingOrder.fulfillmentType === 'delivery'
-      next.paymentMethodIndex = methodIdx
-      next.paymentMethodLabel = PAYMENT_METHODS[methodIdx].label
-      next.remark = String(existingOrder.remark || '')
-      if (next.fulfillmentType === 'pickup') {
-        pickupPhone = normalizePhone(existingOrder && existingOrder.contact && existingOrder.contact.phone)
-      }
-    } else if (addresses.length === 0) {
-      next.fulfillmentType = 'pickup'
-      next.acceptDeliverySlot = false
-    }
-    next.pickupPhone = pickupPhone
-    this.setData(next)
-    if (preferredAddressId) wx.removeStorageSync('checkout_selected_address_id')
+      preferredAddressId,
+      existingOrder,
+    })
+    this.setData(patch)
+    clearPreferredAddressSelection()
     this.applyCheckoutViewModel()
     this.saveCart()
-    this.recalcLines()
-    this.applyCheckoutViewModel()
-    finishLoadPhase()
-    if (!silent) this.setData({ refresherTriggered: false })
+    recalcLinesAndApplyCheckoutView(this)
+    finishReloadUi()
   },
 
   onPullDownRefresh() {
@@ -445,24 +599,21 @@ createPage({
       return
     }
     const v = e.detail.value
-    this.setData({
+    setDataAndApplyCheckoutView(this, {
       fulfillmentType: v,
       acceptDeliverySlot: v === 'delivery' ? this.data.acceptDeliverySlot : false,
     })
-    this.applyCheckoutViewModel()
   },
 
   onAcceptChange(e) {
     const arr = (e && e.detail && e.detail.value) || []
     const accept = Array.isArray(arr) ? arr.includes('accept') : false
-    this.setData({ acceptDeliverySlot: accept })
-    this.applyCheckoutViewModel()
+    setDataAndApplyCheckoutView(this, { acceptDeliverySlot: accept })
   },
 
   onPaymentMethodPick(e) {
     const idx = Number(e.detail.value || 0)
-    this.setData({ paymentMethodIndex: idx })
-    this.applyCheckoutViewModel()
+    setDataAndApplyCheckoutView(this, { paymentMethodIndex: idx })
   },
 
   onRemarkInput(e) {
@@ -471,26 +622,22 @@ createPage({
 
   onPickupPhoneInput(e) {
     const v = normalizePhone(e && e.detail && e.detail.value)
-    this.setData({ pickupPhone: v })
-    this.applyCheckoutViewModel()
+    setDataAndApplyCheckoutView(this, { pickupPhone: v })
   },
 
   onAddressPick(e) {
     if (this.data.hasExistingOrder && this.data.fulfillmentType === 'delivery') {
-      wx.showToast({ title: '已有订单不可修改地址', icon: 'none' })
       return
     }
     const idx = Number(e.detail.value || 0)
     const arr = this.data.addresses || []
     const picked = arr[idx]
     if (!picked) return
-    this.setData({ selectedAddressId: picked.id })
-    this.applyCheckoutViewModel()
+    setDataAndApplyCheckoutView(this, { selectedAddressId: picked.id })
   },
 
   goAddressBook() {
     if (this.data.hasExistingOrder && this.data.fulfillmentType === 'delivery') {
-      wx.showToast({ title: '已有订单不可修改地址', icon: 'none' })
       return
     }
     this._fromAddressBook = true
@@ -498,66 +645,49 @@ createPage({
     wx.navigateTo({ url: `/pages/address-book/index?select=1&selectedAddressId=${encodeURIComponent(selectedAddressId)}` })
   },
 
+  async handleSubmitError(res) {
+    invalidateSnapshot()
+    if (res.code === 'OUT_OF_STOCK') {
+      wx.showToast({ title: outOfStockMessage(res.detail, '库存不足，请返回菜单调整'), icon: 'none' })
+      await this.reload()
+      return
+    }
+    if (res.code === 'MIN_ORDER_NOT_MET') {
+      const d = res.detail || {}
+      const msg = `未达到起送价：€${centToEuro(d.minOrderCents || 0)}`
+      wx.showToast({ title: msg, icon: 'none' })
+      return
+    }
+    if (res.code === 'FULFILLMENT_LOCKED' || res.code === 'ADDRESS_LOCKED') {
+      wx.showToast({ title: res.message || '已有订单不可修改交货方式或地址', icon: 'none' })
+      await this.reload()
+      return
+    }
+    if (res.code === 'ORDER_LOCKED_FOR_CUSTOMER') {
+      wx.showToast({ title: res.message || '该订单已锁定，无法修改', icon: 'none' })
+      await this.reload()
+      return
+    }
+    if (res.code === 'INVALID_PHONE') {
+      wx.showToast({ title: '请填写有效电话', icon: 'none' })
+      return
+    }
+    if (res.code === 'PROFILE_INCOMPLETE') {
+      await showResultError(res, '请先完善资料')
+      wx.navigateTo({ url: '/pages/profile-setup/index?from=checkout' })
+      return
+    }
+    await showResultError(res, '下单失败')
+  },
+
   async submit() {
     if (this.data.submitDisabled || this.data.submitting) return
-    this.setData({ submitting: true })
-    this.applyCheckoutViewModel()
-    const paymentMethod = PAYMENT_METHODS[this.data.paymentMethodIndex].value
-    const lockedType = String(this.data.existingOrderFulfillmentType || '').trim()
-    const effectiveType = this.data.hasExistingOrder && lockedType ? lockedType : this.data.fulfillmentType
-    const lockedAddressId = String(this.data.existingOrderAddressId || '').trim()
-    const effectiveAddressId =
-      effectiveType === 'delivery'
-        ? this.data.hasExistingOrder && lockedAddressId
-          ? lockedAddressId
-          : this.data.selectedAddressId
-        : ''
-    const payload = {
-      saleId: this.data.sale && this.data.sale._id,
-      fulfillmentType: effectiveType,
-      addressId: effectiveAddressId,
-      phone: effectiveType === 'pickup' ? normalizePhone(this.data.pickupPhone) : '',
-      acceptDeliverySlot: effectiveType === 'delivery' ? !!this.data.acceptDeliverySlot : false,
-      items: this.data.cartItems.map((it) => ({ dishId: it.dishId, qty: Number(it.qty || 0) })),
-      payment: { method: paymentMethod },
-      remark: String(this.data.remark || '').trim(),
-    }
+    setDataAndApplyCheckoutView(this, { submitting: true })
+    const payload = buildCreateOrderPayload(this.data)
     const res = await call('customer', 'createOrder', payload)
-    this.setData({ submitting: false })
-    this.applyCheckoutViewModel()
+    setDataAndApplyCheckoutView(this, { submitting: false })
     if (!res.ok) {
-      invalidateSnapshot()
-      if (res.code === 'OUT_OF_STOCK') {
-        wx.showToast({ title: outOfStockMessage(res.detail, '库存不足，请返回菜单调整'), icon: 'none' })
-        await this.reload()
-        return
-      }
-      if (res.code === 'MIN_ORDER_NOT_MET') {
-        const d = res.detail || {}
-        const msg = `未达到起送价：€${centToEuro(d.minOrderCents || 0)}`
-        wx.showToast({ title: msg, icon: 'none' })
-        return
-      }
-      if (res.code === 'FULFILLMENT_LOCKED' || res.code === 'ADDRESS_LOCKED') {
-        wx.showToast({ title: res.message || '已有订单不可修改交货方式或地址', icon: 'none' })
-        await this.reload()
-        return
-      }
-      if (res.code === 'ORDER_LOCKED_FOR_CUSTOMER') {
-        wx.showToast({ title: res.message || '该订单已锁定，无法修改', icon: 'none' })
-        await this.reload()
-        return
-      }
-      if (res.code === 'INVALID_PHONE') {
-        wx.showToast({ title: '请填写有效电话', icon: 'none' })
-        return
-      }
-      if (res.code === 'PROFILE_INCOMPLETE') {
-        await showResultError(res, '请先完善资料')
-        wx.navigateTo({ url: '/pages/profile-setup/index?from=checkout' })
-        return
-      }
-      await showResultError(res, '下单失败')
+      await this.handleSubmitError(res)
       return
     }
     invalidateSnapshot()

@@ -34,6 +34,24 @@ function normalizeMyCurrentSaleOrder(raw) {
   }
 }
 
+function buildProfileSummary(rawProfile) {
+  return {
+    isComplete: !!(rawProfile && rawProfile.isComplete),
+    nickname: String((rawProfile && rawProfile.nickname) || ''),
+    addressCount: Number((rawProfile && rawProfile.addressCount) || 0),
+    defaultAddressId: String((rawProfile && rawProfile.defaultAddressId) || ''),
+  }
+}
+
+function buildSaleInfo(rawSale) {
+  return {
+    saleId: String((rawSale && rawSale.saleId) || ''),
+    status: String((rawSale && rawSale.status) || ''),
+    deliveryTimeSlotLabel: String((rawSale && rawSale.deliveryTimeSlotLabel) || ''),
+    note: String((rawSale && rawSale.note) || '').trim(),
+  }
+}
+
 function buildCustomerOrderProgressText(saleInfo, myCurrentSaleOrder) {
   const saleStatus = String((saleInfo && saleInfo.status) || '').trim()
   const hasActiveOrder = !!(myCurrentSaleOrder && myCurrentSaleOrder.hasActiveOrder)
@@ -76,6 +94,28 @@ function buildNoticeLines(note) {
     .split('\n')
 }
 
+function buildNoticeViewState(note) {
+  const noticePreview = buildNoticePreview(note)
+  return {
+    noticePreviewText: noticePreview.text,
+    noticeCanToggle: noticePreview.canToggle,
+    noticeLines: buildNoticeLines(note),
+  }
+}
+
+function buildApplySnapshotPatch(profileSummary, currentData) {
+  const patch = {
+    showNicknamePopup: !profileSummary.isComplete,
+  }
+  if (profileSummary.isComplete) {
+    patch.nicknameSaving = false
+    patch.nicknamePopupError = ''
+  } else if (!String((currentData && currentData.nicknameDraft) || '').trim()) {
+    patch.nicknameDraft = profileSummary.nickname
+  }
+  return patch
+}
+
 function sortDishesBySaleState(dishes, saleInfo) {
   if (!saleIsOpen(saleInfo)) return dishes
   const sorted = [...dishes]
@@ -88,6 +128,85 @@ function sortDishesBySaleState(dishes, saleInfo) {
     return nameA.localeCompare(nameB)
   })
   return sorted
+}
+
+function decorateHomeDish(d, saleInfo, prevQtyMap) {
+  const inSale = !!d.inSale
+  const isSoldOut = !!d.isSoldOut
+  const isOpen = saleIsOpen(saleInfo)
+  const canAdd = !isOpen || (inSale && !isSoldOut)
+  const statusText = isOpen ? (inSale ? (isSoldOut ? '售罄' : '可下单') : '本次不卖') : '未开单'
+  const statusClass = isOpen ? (inSale ? (isSoldOut ? 'sold-out' : 'ok') : 'closed') : 'not-open'
+  const statusRank = isOpen ? (inSale ? (isSoldOut ? 1 : 0) : 2) : 0
+  const qty = Math.max(0, Number(prevQtyMap[d._id] || 0))
+  return {
+    ...d,
+    priceEuro: centToEuro(d.priceCents || 0),
+    thumb: d.thumbUrl || '',
+    descPlain: d.descPlain || '',
+    inSale,
+    isSoldOut,
+    canAdd,
+    statusText,
+    statusClass,
+    statusRank,
+    qty,
+  }
+}
+
+function buildQtyMapFromDishes(dishes) {
+  const qtyMap = {}
+  for (const d of dishes || []) qtyMap[d._id] = Number(d.qty || 0)
+  return qtyMap
+}
+
+function buildDishSelectionState(dishes) {
+  const qtyMap = buildQtyMapFromDishes(dishes)
+  const { totalQty, totalAmountCents } = calcTotals(dishes || [], qtyMap)
+  return {
+    qtyMap,
+    totalQty,
+    totalAmountEuro: centToEuro(totalAmountCents),
+  }
+}
+
+function applyDishSelectionState(page, dishes) {
+  page.setData({
+    dishes,
+    ...buildDishSelectionState(dishes),
+  })
+}
+
+function buildCheckoutCartItemsFromDishes(dishes) {
+  const items = []
+  for (const d of Array.isArray(dishes) ? dishes : []) {
+    const qty = Number(d && d.qty)
+    if (qty <= 0) continue
+    items.push({
+      dishId: d._id,
+      qty,
+      name: d.name,
+      priceCents: Number(d.priceCents || 0),
+    })
+  }
+  return items
+}
+
+function formatStampedErrorMessage(message) {
+  const msg = String(message || '未知错误')
+  const now = new Date()
+  const hh = `${now.getHours()}`.padStart(2, '0')
+  const mm = `${now.getMinutes()}`.padStart(2, '0')
+  const ss = `${now.getSeconds()}`.padStart(2, '0')
+  return {
+    message: msg,
+    stamped: `[${hh}:${mm}:${ss}] ${msg}`,
+  }
+}
+
+function setHomeRefresherTriggered(page, silent, triggered) {
+  if (silent) return
+  page.setData({ refresherTriggered: !!triggered })
 }
 
 createPage({
@@ -155,85 +274,33 @@ createPage({
 
   applySnapshot(snapshot, options = {}) {
     const rawProfile = snapshot.profile || null
-    const profileSummary = {
-      isComplete: !!(rawProfile && rawProfile.isComplete),
-      nickname: String((rawProfile && rawProfile.nickname) || ''),
-      addressCount: Number((rawProfile && rawProfile.addressCount) || 0),
-      defaultAddressId: String((rawProfile && rawProfile.defaultAddressId) || ''),
-    }
+    const profileSummary = buildProfileSummary(rawProfile)
     this.applyBootstrap(snapshot.sale, snapshot.dishes, rawProfile, snapshot.session || null, snapshot.myCurrentSaleOrder || null)
-    const patch = {
-      showNicknamePopup: !profileSummary.isComplete,
-    }
-    if (profileSummary.isComplete) {
-      patch.nicknameSaving = false
-      patch.nicknamePopupError = ''
-    } else if (!String(this.data.nicknameDraft || '').trim()) {
-      patch.nicknameDraft = profileSummary.nickname
-    }
+    const patch = buildApplySnapshotPatch(profileSummary, this.data)
     this.setData(patch)
     return true
   },
 
   applyBootstrap(rawSale, rawDishes, rawProfile, rawSession, rawMyCurrentSaleOrder) {
     const prevQtyMap = { ...(this.data.qtyMap || {}) }
-    const saleInfo = {
-      saleId: String((rawSale && rawSale.saleId) || ''),
-      status: String((rawSale && rawSale.status) || ''),
-      deliveryTimeSlotLabel: String((rawSale && rawSale.deliveryTimeSlotLabel) || ''),
-      note: String((rawSale && rawSale.note) || '').trim(),
-    }
-    const dishes = normalizeDishes(rawDishes).map((d) => {
-      const inSale = !!d.inSale
-      const isSoldOut = !!d.isSoldOut
-      const isOpen = saleIsOpen(saleInfo)
-      const canAdd = !isOpen || (inSale && !isSoldOut)
-      const statusText = isOpen ? (inSale ? (isSoldOut ? '售罄' : '可下单') : '本次不卖') : '未开单'
-      const statusClass = isOpen ? (inSale ? (isSoldOut ? 'sold-out' : 'ok') : 'closed') : 'not-open'
-      const statusRank = isOpen ? (inSale ? (isSoldOut ? 1 : 0) : 2) : 0
-      const qty = Math.max(0, Number(prevQtyMap[d._id] || 0))
-      return {
-        ...d,
-        priceEuro: centToEuro(d.priceCents || 0),
-        thumb: d.thumbUrl || '',
-        descPlain: d.descPlain || '',
-        inSale,
-        isSoldOut,
-        canAdd,
-        statusText,
-        statusClass,
-        statusRank,
-        qty,
-      }
-    })
+    const saleInfo = buildSaleInfo(rawSale)
+    const dishes = normalizeDishes(rawDishes).map((d) => decorateHomeDish(d, saleInfo, prevQtyMap))
     const sorted = sortDishesBySaleState(dishes, saleInfo)
-    const qtyMap = {}
-    for (const d of sorted) qtyMap[d._id] = Number(d.qty || 0)
-    const { totalQty, totalAmountCents } = calcTotals(sorted, qtyMap)
-    const profileSummary = {
-      isComplete: !!(rawProfile && rawProfile.isComplete),
-      nickname: String((rawProfile && rawProfile.nickname) || ''),
-      addressCount: Number((rawProfile && rawProfile.addressCount) || 0),
-      defaultAddressId: String((rawProfile && rawProfile.defaultAddressId) || ''),
-    }
+    const dishSelectionState = buildDishSelectionState(sorted)
+    const profileSummary = buildProfileSummary(rawProfile)
     const myCurrentSaleOrder = normalizeMyCurrentSaleOrder(rawMyCurrentSaleOrder)
     const customerOrderProgressText = buildCustomerOrderProgressText(saleInfo, myCurrentSaleOrder)
     const shouldShowDeliverySlot = shouldShowDeliverySlotForCurrentCustomer(saleInfo, myCurrentSaleOrder)
-    const noticePreview = buildNoticePreview(saleInfo.note)
-    const noticeLines = buildNoticeLines(saleInfo.note)
+    const noticeViewState = buildNoticeViewState(saleInfo.note)
     this.setData({
       saleInfo,
       profileSummary,
       myCurrentSaleOrder,
       customerOrderProgressText,
       shouldShowDeliverySlot,
-      noticePreviewText: noticePreview.text,
-      noticeCanToggle: noticePreview.canToggle,
-      noticeLines,
       dishes: sorted,
-      qtyMap,
-      totalQty,
-      totalAmountEuro: centToEuro(totalAmountCents),
+      ...dishSelectionState,
+      ...noticeViewState,
       isAdmin: !!(rawSession && rawSession.isAdmin),
       isHydrating: false,
       lastErrorMsg: '',
@@ -241,12 +308,9 @@ createPage({
   },
 
   reportError(message, detail) {
-    const msg = String(message || '未知错误')
-    const now = new Date()
-    const hh = `${now.getHours()}`.padStart(2, '0')
-    const mm = `${now.getMinutes()}`.padStart(2, '0')
-    const ss = `${now.getSeconds()}`.padStart(2, '0')
-    const stamped = `[${hh}:${mm}:${ss}] ${msg}`
+    const built = formatStampedErrorMessage(message)
+    const msg = built.message
+    const stamped = built.stamped
     this.setData({ lastErrorMsg: stamped })
     // eslint-disable-next-line no-console
     console.error('[index]', msg, detail || '')
@@ -305,7 +369,7 @@ createPage({
   async reload(options = {}) {
     const silent = !!options.silent
     const allowRedirect = options.allowRedirect !== false
-    if (!silent) this.setData({ refresherTriggered: true })
+    setHomeRefresherTriggered(this, silent, true)
     invalidateSnapshot()
     let snapshot = null
     try {
@@ -313,7 +377,7 @@ createPage({
     } catch (err) {
       snapshot = null
     }
-    if (!silent) this.setData({ refresherTriggered: false })
+    setHomeRefresherTriggered(this, silent, false)
     if (!snapshot) {
       this.setData({ isHydrating: false })
       this.reportError('加载菜单失败')
@@ -355,15 +419,7 @@ createPage({
       }
       return { ...d, qty: next }
     })
-    const qtyMap = {}
-    for (const d of dishes) qtyMap[d._id] = Number(d.qty || 0)
-    const { totalQty, totalAmountCents } = calcTotals(dishes, qtyMap)
-    this.setData({
-      dishes,
-      qtyMap,
-      totalQty,
-      totalAmountEuro: centToEuro(totalAmountCents),
-    })
+    applyDishSelectionState(this, dishes)
     if (hitStockLimit) {
       wx.showToast({ title: '库存不足', icon: 'none' })
     }
@@ -377,17 +433,7 @@ createPage({
       })
       return
     }
-    const items = []
-    for (const d of this.data.dishes) {
-      const qty = Number(d.qty || 0)
-      if (qty <= 0) continue
-      items.push({
-        dishId: d._id,
-        qty,
-        name: d.name,
-        priceCents: Number(d.priceCents || 0),
-      })
-    }
+    const items = buildCheckoutCartItemsFromDishes(this.data.dishes)
     if (items.length === 0) return
     wx.setStorageSync('checkout_cart', {
       items,
