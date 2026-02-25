@@ -224,6 +224,10 @@ createPage({
     wx.navigateTo({ url: '/pages/admin/customers/index' })
   },
 
+  goManualOrderCreate() {
+    wx.navigateTo({ url: '/pages/admin/manual-order-create/index' })
+  },
+
   goActiveSaleEdit() {
     wx.navigateTo({ url: '/pages/admin/sale-active-edit/index' })
   },
