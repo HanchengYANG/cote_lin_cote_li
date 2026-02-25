@@ -21,9 +21,11 @@ const { createDashboardHandlers } = require('./handlers/dashboard')
 const { createFulfillmentReadHandlers } = require('./handlers/fulfillment-read')
 const { createFulfillmentWriteHandlers } = require('./handlers/fulfillment-write')
 const { createAdminReadHandlers } = require('./handlers/read-admin')
+const { createManualOrderReadHandlers } = require('./handlers/manual-order-read')
 const { createSaleHandlers } = require('./handlers/sale')
 const { createDishHandlers } = require('./handlers/dish')
 const { createOrderWriteHandlers } = require('./handlers/order-write')
+const { createManualOrderWriteHandlers } = require('./handlers/manual-order-write')
 const { createAdminSystemConfigRepo } = require('./repos/system-config-repo')
 const { createAdminSaleItemsRepo } = require('./repos/sale-items-repo')
 
@@ -670,6 +672,21 @@ exports.main = async (event) => {
     return adminReadHandlers[action](event, { openId })
   }
 
+  const manualOrderReadHandlers = createManualOrderReadHandlers({
+    db,
+    getAllByPaging,
+    ok,
+    fail,
+    getSale,
+    getCustomerAddressesByOpenIds,
+    buildAddressMapByOpenId,
+    pickDefaultPhone,
+    normalizePhone,
+  })
+  if (manualOrderReadHandlers[action]) {
+    return manualOrderReadHandlers[action](event, { openId })
+  }
+
   const saleHandlers = createSaleHandlers({
     cloud,
     db,
@@ -741,6 +758,29 @@ exports.main = async (event) => {
   })
   if (orderWriteHandlers[action]) {
     return orderWriteHandlers[action](event, { openId })
+  }
+
+  const manualOrderWriteHandlers = createManualOrderWriteHandlers({
+    db,
+    _,
+    ok,
+    fail,
+    ORDER_STATUS,
+    HANDOFF_STATUS,
+    throwBiz,
+    getSaleTx,
+    normalizeDishConfigs,
+    toSafeInt,
+    normalizeOrderItems,
+    replaceSaleItemsForSaleTx,
+    normalizePhone,
+    normalizeAddressPayload,
+    normalizeStoredAddresses,
+    isPhoneValid,
+    extractOrderAddressSnapshot,
+  })
+  if (manualOrderWriteHandlers[action]) {
+    return manualOrderWriteHandlers[action](event, { openId })
   }
 
   return fail('UNKNOWN_ACTION', `Unknown action: ${action || ''}`)
