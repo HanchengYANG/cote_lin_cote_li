@@ -373,6 +373,27 @@ createPage({
     const res = await call('admin', 'getCustomerDetail', { customerOpenId })
     if (isStalePick()) return
     if (!res.ok) {
+      const clearPatch = {
+        selectedCustomerOpenId: '',
+        selectedCustomer: null,
+        customerAddresses: [],
+        selectedAddressId: '',
+        selectedAddressIndex: 0,
+      }
+      if (
+        String(this.data.customerAction || '') === 'select_existing' &&
+        String(this.data.fulfillmentTypeDraft || '') === 'delivery'
+      ) {
+        const manualAddressModeIndex = Math.max(
+          0,
+          ADDRESS_MODE_OPTIONS.findIndex((x) => x && x.value === 'manual')
+        )
+        clearPatch.addressMode = 'manual'
+        clearPatch.addressModeIndex = manualAddressModeIndex
+      }
+      if (!isStalePick()) {
+        this.setData(clearPatch)
+      }
       showToast(res.message || '加载客人失败')
       return
     }
