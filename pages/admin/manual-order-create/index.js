@@ -361,10 +361,17 @@ createPage({
   async pickCustomer(e) {
     const customerOpenId = String((e.currentTarget.dataset && e.currentTarget.dataset.id) || '').trim()
     if (!customerOpenId) return
+    const reqSeq = (Number(this._pickCustomerReqSeq) || 0) + 1
+    this._pickCustomerReqSeq = reqSeq
+    const isStalePick = () => {
+      if (reqSeq !== this._pickCustomerReqSeq) return true
+      return String(this.data.selectedCustomerOpenId || '').trim() !== customerOpenId
+    }
     const pickedRow =
       this.data.recentCustomers.find((x) => String((x && x.customerOpenId) || '').trim() === customerOpenId) || null
     this.setData({ selectedCustomerOpenId: customerOpenId })
     const res = await call('admin', 'getCustomerDetail', { customerOpenId })
+    if (isStalePick()) return
     if (!res.ok) {
       showToast(res.message || '加载客人失败')
       return
@@ -403,6 +410,7 @@ createPage({
     if (this.data.fulfillmentTypeDraft === 'pickup' && !String(this.data.pickupPhoneDraft || '').trim()) {
       patch.pickupPhoneDraft = normalizePhone(selectedCustomer.defaultPhone || '')
     }
+    if (isStalePick()) return
     this.setData(patch)
   },
 

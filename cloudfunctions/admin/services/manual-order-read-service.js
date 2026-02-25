@@ -64,7 +64,20 @@ function createManualOrderReadService(deps) {
         const r = await db.collection('sales').where({ status: 'OPEN' }).orderBy('createdAt', 'desc').limit(1).get()
         openSale = (r && Array.isArray(r.data) && r.data[0]) || null
       } catch (err) {
-        openSale = null
+        try {
+          console.warn('[manual-order-read] query OPEN sale with orderBy failed, fallback to in-memory sort', err && err.message)
+          const r2 = await db.collection('sales').where({ status: 'OPEN' }).limit(20).get()
+          const rows = Array.isArray(r2 && r2.data) ? r2.data.slice() : []
+          rows.sort((a, b) => {
+            const ta = new Date((a && a.createdAt) || 0).getTime() || 0
+            const tb = new Date((b && b.createdAt) || 0).getTime() || 0
+            return tb - ta
+          })
+          openSale = rows[0] || null
+        } catch (err2) {
+          console.warn('[manual-order-read] fallback query OPEN sale failed', err2 && err2.message)
+          openSale = null
+        }
       }
 
       let sale = null
