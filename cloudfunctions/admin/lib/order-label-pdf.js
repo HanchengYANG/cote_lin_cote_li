@@ -18,21 +18,17 @@ function requirePdfKit() {
   }
 }
 
-function getFontPathCandidates(filename) {
-  return [
-    path.join(__dirname, '..', 'assets', 'fonts', filename),
-    path.join(__dirname, '..', 'assets', 'fonts', 'static', filename),
-  ]
+function getFontPath(filename) {
+  return path.join(__dirname, '..', 'assets', 'fonts', filename)
 }
 
 function resolveExistingFontPath(filename) {
-  const candidates = getFontPathCandidates(filename)
-  for (const p of candidates) {
-    try {
-      if (fs.existsSync(p)) return p
-    } catch (err) {}
+  const p = getFontPath(filename)
+  try {
+    return fs.existsSync(p) ? p : ''
+  } catch (err) {
+    return ''
   }
-  return ''
 }
 
 function registerPdfFonts(doc) {
@@ -44,8 +40,8 @@ function registerPdfFonts(doc) {
     if (!fontPath || !boldFontPath) {
       throw createBizError('FONT_LOAD_FAILED', 'NotoSansSC font files not found', {
         required: ['NotoSansSC-Regular.ttf', 'NotoSansSC-Bold.ttf'],
-        searchedRegular: getFontPathCandidates('NotoSansSC-Regular.ttf'),
-        searchedBold: getFontPathCandidates('NotoSansSC-Bold.ttf'),
+        searchedRegular: [getFontPath('NotoSansSC-Regular.ttf')],
+        searchedBold: [getFontPath('NotoSansSC-Bold.ttf')],
       })
     }
   } catch (err) {
