@@ -1,9 +1,16 @@
 const { call } = require('../../../utils/api')
 const { invalidateSnapshot } = require('../../../utils/app-snapshot')
 const { showErrorDialog } = require('../../../utils/error-feedback')
-const { normalizePhone, isPhoneValid } = require('../../../utils/phone')
+const {
+  normalizePhone,
+  normalizePhoneInputDigits,
+  isPhoneValid,
+  formatPhoneDisplay,
+  formatPhoneBlurValue,
+} = require('../../../utils/phone')
 const { normalizeFrAddress, isFrAddressValid } = require('../../../utils/fr-address')
 const { parseSlotLabel, buildSlotLabel } = require('../../../utils/delivery-slot')
+const { suggestAddressDirect } = require('../../../utils/address-suggest')
 const { createPage } = require('../../../utils/create-page')
 const {
   decorateOrder,
@@ -93,6 +100,15 @@ function toDishPickerOption(d) {
   }
 }
 
+function line1FromSuggestion(suggestion) {
+  const raw = String((suggestion && (suggestion.line1 || suggestion.label)) || '').trim()
+  const parts = raw.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2 && String(parts[0]).toLowerCase() === String(parts[1]).toLowerCase()) {
+    parts.splice(1, 1)
+  }
+  return parts.join(' ')
+}
+
 function normalizeManualAddress(input) {
   const normalized = normalizeFrAddress(input) || {}
   return {
@@ -139,6 +155,8 @@ createPage({
       city: '',
       country: 'FR',
     },
+    manualAddressSuggestions: [],
+    manualAddressLine1Focused: false,
     deliverySlotInput: '',
     slotDate: '',
     slotStart: '',
@@ -157,15 +175,25 @@ createPage({
     handoffStatusOptions: HANDOFF_STATUS_OPTIONS,
     handoffStatusIndex: 0,
     handoffStatusDraft: 'PENDING',
+    remarkDraft: '',
     showDishPicker: false,
     loadingDishPicker: false,
     allDishesForPick: [],
   },
 
   onLoad(query) {
+    this._manualAddrSuggestReqId = 0
+    this._manualAddrSuggestTimer = null
+    this._isPickingManualAddrSuggestion = false
     const orderId = (query && query.orderId) || ''
     this.setData({ orderId })
     this.reload()
+  },
+
+  onUnload() {
+    if (this._manualAddrSuggestTimer) clearTimeout(this._manualAddrSuggestTimer)
+    this._manualAddrSuggestTimer = null
+    this._isPickingManualAddrSuggestion = false
   },
 
   async reload() {
@@ -193,6 +221,7 @@ createPage({
     )
     let phoneDraft = normalizePhone(rawOrder && rawOrder.contact && rawOrder.contact.phone)
     if (!phoneDraft && matchedSavedAddress && matchedSavedAddress.phone) phoneDraft = normalizePhone(matchedSavedAddress.phone)
+    phoneDraft = formatPhoneDisplay(phoneDraft) || phoneDraft
     const normalizedMethod = normalizePaymentMethodValue(rawOrder && rawOrder.payment && rawOrder.payment.method)
     const paymentMethodIndex = PAYMENT_METHOD_OPTIONS.findIndex((it) => it.value === normalizedMethod)
     const normalizedPaidStatus = normalizePaidStatusValue(rawOrder && rawOrder.payment && rawOrder.payment.paidStatus)
@@ -200,6 +229,7 @@ createPage({
     const normalizedHandoffStatus = normalizeHandoffStatusValue(rawOrder && rawOrder.handoffStatus)
     const handoffStatusIndex = HANDOFF_STATUS_OPTIONS.findIndex((it) => it.value === normalizedHandoffStatus)
     const rawStatus = String((rawOrder && rawOrder.status) || '').trim()
+    const remarkDraft = String((rawOrder && rawOrder.remark) || '')
     this.setData({
       order,
       canEditItems,
@@ -226,6 +256,7 @@ createPage({
       paidStatusDraft: normalizedPaidStatus,
       handoffStatusIndex: handoffStatusIndex >= 0 ? handoffStatusIndex : 0,
       handoffStatusDraft: normalizedHandoffStatus,
+      remarkDraft,
     })
   },
 
@@ -380,6 +411,9 @@ createPage({
     const currentItemsPayload = buildItemsPayloadForCompare(this.data.order && this.data.order.items)
     const nextItemsPayload = buildItemsPayloadForCompare(payloadItems)
     const itemsChanged = !sameItemsPayload(currentItemsPayload, nextItemsPayload)
+    const currentRemark = String((this.data.order && this.data.order.remark) || '').trim()
+    const nextRemark = String(this.data.remarkDraft || '').trim()
+    const remarkChanged = currentRemark !== nextRemark
     const hasAny = payloadItems.some((it) => it.qty > 0)
     if (itemsChanged && !hasAny) {
       this.setData({ saving: false })
@@ -399,7 +433,7 @@ createPage({
       return
     }
 
-    if (!itemsChanged && !fulfillmentRes.changed && !paymentRes.changed) {
+    if (!itemsChanged && !fulfillmentRes.changed && !paymentRes.changed && !remarkChanged) {
       this.setData({ saving: false })
       wx.showToast({ title: '无修改', icon: 'none' })
       return
@@ -412,12 +446,18 @@ createPage({
         items: payloadItems,
       })
     }
-    this.setData({ saving: false })
     if (!res.ok) {
+      this.setData({ saving: false })
       wx.showToast({ title: res.message || '保存失败', icon: 'none' })
       await this.reload()
       return
     }
+    const remarkRes = await this.saveRemarkDraft()
+    if (!remarkRes.ok) {
+      this.setData({ saving: false })
+      return
+    }
+    this.setData({ saving: false })
     invalidateSnapshot()
     navigateBackAfterSuccess('已保存')
   },
@@ -475,7 +515,16 @@ createPage({
 
   onFulfillmentChange(e) {
     const fulfillmentTypeDraft = String((e && e.detail && e.detail.value) || 'delivery')
-    this.setData({ fulfillmentTypeDraft })
+    const patch = { fulfillmentTypeDraft }
+    if (fulfillmentTypeDraft !== 'delivery') {
+      if (this._manualAddrSuggestTimer) clearTimeout(this._manualAddrSuggestTimer)
+      this._manualAddrSuggestTimer = null
+      this._manualAddrSuggestReqId = (this._manualAddrSuggestReqId || 0) + 1
+      this._isPickingManualAddrSuggestion = false
+      patch.manualAddressSuggestions = []
+      patch.manualAddressLine1Focused = false
+    }
+    this.setData(patch)
   },
 
   onAddressModeChange(e) {
@@ -486,7 +535,16 @@ createPage({
       this.setData({ addressMode: 'manual' })
       return
     }
-    this.setData({ addressMode })
+    const patch = { addressMode }
+    if (addressMode !== 'manual') {
+      if (this._manualAddrSuggestTimer) clearTimeout(this._manualAddrSuggestTimer)
+      this._manualAddrSuggestTimer = null
+      this._manualAddrSuggestReqId = (this._manualAddrSuggestReqId || 0) + 1
+      this._isPickingManualAddrSuggestion = false
+      patch.manualAddressSuggestions = []
+      patch.manualAddressLine1Focused = false
+    }
+    this.setData(patch)
   },
 
   onPickSavedAddress(e) {
@@ -499,22 +557,145 @@ createPage({
       selectedAddressIndex: idx,
     }
     const phone = normalizePhone(picked.phone || '')
-    if (phone) next.phoneDraft = phone
+    if (phone) next.phoneDraft = formatPhoneDisplay(phone) || phone
     this.setData(next)
   },
 
   onPhoneInput(e) {
-    const v = normalizePhone(e && e.detail && e.detail.value)
+    const v = normalizePhoneInputDigits(e && e.detail && e.detail.value)
     this.setData({ phoneDraft: v })
+  },
+
+  onPhoneBlur() {
+    this.setData({ phoneDraft: formatPhoneBlurValue(this.data.phoneDraft) })
   },
 
   onManualAddressInput(e) {
     const key = String((e.currentTarget.dataset && e.currentTarget.dataset.k) || '').trim()
     if (!key) return
-    const current = normalizeManualAddress(this.data.manualAddress)
-    current[key] = String(e && e.detail && e.detail.value ? e.detail.value : '').trim()
+    const current = {
+      ...(this.data.manualAddress || {}),
+    }
+    const rawValue = String((e && e.detail && e.detail.value) || '')
+    current[key] = key === 'phone' ? normalizePhoneInputDigits(rawValue) : rawValue
     if (key === 'country') current[key] = current[key].toUpperCase()
     this.setData({ manualAddress: current })
+  },
+
+  onManualAddressPhoneBlur() {
+    this.setData({
+      manualAddress: {
+        ...(this.data.manualAddress || {}),
+        phone: formatPhoneBlurValue(this.data.manualAddress && this.data.manualAddress.phone),
+      },
+    })
+  },
+
+  onManualAddressLine1Input(e) {
+    const value = String((e && e.detail && e.detail.value) || '')
+    this.setData({
+      manualAddress: {
+        ...(this.data.manualAddress || {}),
+        line1: value,
+      },
+    })
+    if (this._isPickingManualAddrSuggestion) return
+    if (this.data.fulfillmentTypeDraft !== 'delivery') return
+    if (this.data.addressMode !== 'manual') return
+    this.debouncedManualAddressSuggest(value)
+  },
+
+  onManualAddressLine1Focus() {
+    this.setData({ manualAddressLine1Focused: true })
+  },
+
+  onManualAddressLine1Blur() {
+    if (this._isPickingManualAddrSuggestion) return
+    this.setData({ manualAddressLine1Focused: false, manualAddressSuggestions: [] })
+  },
+
+  onManualAddressSuggestionTouchStart() {
+    this._isPickingManualAddrSuggestion = true
+  },
+
+  debouncedManualAddressSuggest(q) {
+    const s = String(q || '').trim()
+    if (this._manualAddrSuggestTimer) clearTimeout(this._manualAddrSuggestTimer)
+    if (s.length < 3) {
+      this.setData({ manualAddressSuggestions: [] })
+      return
+    }
+    const reqId = (this._manualAddrSuggestReqId || 0) + 1
+    this._manualAddrSuggestReqId = reqId
+    this._manualAddrSuggestTimer = setTimeout(() => {
+      this.fetchManualAddressSuggestions(s, reqId)
+    }, 250)
+  },
+
+  async fetchManualAddressSuggestions(q, reqId) {
+    const res = await suggestAddressDirect(q, 5)
+    if (reqId !== this._manualAddrSuggestReqId) return
+    if (this._isPickingManualAddrSuggestion || !this.data.manualAddressLine1Focused) return
+    const latestLine1 = String((this.data.manualAddress && this.data.manualAddress.line1) || '').trim()
+    if (latestLine1 !== String(q || '').trim()) return
+    if (!res.ok || !Array.isArray(res.suggestions)) {
+      this.setData({ manualAddressSuggestions: [] })
+      return
+    }
+    this.setData({ manualAddressSuggestions: res.suggestions })
+  },
+
+  pickManualAddressSuggestion(e) {
+    if (this._manualAddrSuggestTimer) clearTimeout(this._manualAddrSuggestTimer)
+    this._manualAddrSuggestTimer = null
+    this._manualAddrSuggestReqId = (this._manualAddrSuggestReqId || 0) + 1
+    const idx = Number((e.currentTarget.dataset && e.currentTarget.dataset.i) || 0)
+    const s = (this.data.manualAddressSuggestions || [])[idx]
+    if (!s) {
+      this._isPickingManualAddrSuggestion = false
+      return
+    }
+    const current = this.data.manualAddress || {}
+    this.setData({
+      manualAddress: {
+        ...current,
+        line1: line1FromSuggestion(s),
+        postalCode: String(s.postalCode || '').trim(),
+        city: String(s.city || '').trim(),
+      },
+      manualAddressSuggestions: [],
+      manualAddressLine1Focused: false,
+    })
+    const clearPickingFlag = () => {
+      this._isPickingManualAddrSuggestion = false
+    }
+    setTimeout(clearPickingFlag, 120)
+    wx.hideKeyboard({
+      complete: clearPickingFlag,
+    })
+  },
+
+  onRemarkInput(e) {
+    this.setData({ remarkDraft: String((e && e.detail && e.detail.value) || '') })
+  },
+
+  async saveRemarkDraft() {
+    const order = this.data.order
+    if (!order || !this.data.orderId) return { ok: true, changed: false }
+    if (!this.data.canEditItems) return { ok: true, changed: false }
+    const currentRemark = String((order && order.remark) || '').trim()
+    const nextRemark = String(this.data.remarkDraft || '').trim()
+    if (currentRemark === nextRemark) return { ok: true, changed: false }
+    const res = await call('admin', 'updateOrderRemark', {
+      orderId: this.data.orderId,
+      remark: nextRemark,
+    })
+    if (!res.ok) {
+      wx.showToast({ title: res.message || '保存备注失败', icon: 'none' })
+      await this.reload()
+      return { ok: false, changed: false }
+    }
+    return { ok: true, changed: true }
   },
 
   async trySaveFulfillmentDraft() {

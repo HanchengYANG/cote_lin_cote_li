@@ -93,7 +93,7 @@
                       <text class="address">{{item.addressDisplay}}</text>
                     </view>
                     <view class="meta-line">
-                      <text class="address">电话：{{item.contact.phone || '-'}}</text>
+                      <text class="address">电话：{{item.phoneText}}</text>
                     </view>
                   </view>
                 </view>

@@ -1,5 +1,6 @@
 const { call } = require('../../utils/api')
 const { formatTime, centToEuro } = require('../../utils/format')
+const { formatPhoneDisplay } = require('../../utils/phone')
 const { createPage } = require('../../utils/create-page')
 
 function saleStatusText(status) {
@@ -60,7 +61,7 @@ function decorateRunOrder(order) {
     ...o,
     customerNameText: String(o.customerNickname || '').trim() || '匿名客户',
     amountEuro: centToEuro(amountCents),
-    phoneText: String((o.contact && o.contact.phone) || '').trim() || '-',
+    phoneText: formatPhoneDisplay(o.contact && o.contact.phone) || '-',
     fulfillmentText: isPickup ? '自取' : '配送',
     addressDisplay: isPickup ? '自取' : String(o.addressText || '').trim() || '地址未填写',
     paymentMethodText: paymentMethodLabel(o.payment && o.payment.method),

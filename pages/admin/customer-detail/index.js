@@ -1,5 +1,6 @@
 const { call } = require('../../../utils/api')
 const { formatTime } = require('../../../utils/format')
+const { formatPhoneDisplay } = require('../../../utils/phone')
 const { decorateOrderSummary } = require('../../../utils/order-list')
 const { createPage } = require('../../../utils/create-page')
 
@@ -12,7 +13,7 @@ function pickDefaultPhone(addresses, defaultAddressId) {
   const arr = Array.isArray(addresses) ? addresses : []
   const targetId = String(defaultAddressId || '').trim()
   const picked = arr.find((x) => String((x && x.id) || '').trim() === targetId) || arr[0] || null
-  return String((picked && picked.phone) || '').trim()
+  return formatPhoneDisplay(picked && picked.phone)
 }
 
 createPage({
@@ -24,7 +25,11 @@ createPage({
   },
 
   onLoad(query) {
-    const customerOpenId = String((query && query.customerOpenId) || '').trim()
+    let customerOpenId = String((query && query.customerOpenId) || '')
+    try {
+      customerOpenId = decodeURIComponent(customerOpenId)
+    } catch (err) {}
+    customerOpenId = customerOpenId.trim()
     this.setData({ customerOpenId })
     this.reload()
   },
@@ -61,6 +66,7 @@ createPage({
           defaultAddressText: formatAddress(defaultAddress) || '-',
           addresses: addresses.map((a) => ({
             ...a,
+            phone: formatPhoneDisplay(a && a.phone),
             fullText: formatAddress(a),
           })),
         }

@@ -26,7 +26,7 @@
           <input class="input half" placeholder="Postal code" value="{{address.postalCode}}" data-k="postalCode" bindinput="onAddrInput" />
           <input class="input half" placeholder="City / Ville" value="{{address.city}}" data-k="city" bindinput="onAddrInput" />
         </view>
-        <input class="input" placeholder="电话（如 +33612345678）" value="{{address.phone}}" data-k="phone" bindinput="onAddrInput" />
+        <input class="input" type="number" placeholder="电话（10位，如 06 12 34 56 78）" value="{{address.phone}}" data-k="phone" bindinput="onAddrInput" bindblur="onPhoneBlur" />
         <label class="switch-row">
           <switch checked="{{setDefault}}" bindchange="onSetDefault" />
           <text>设为默认地址</text>

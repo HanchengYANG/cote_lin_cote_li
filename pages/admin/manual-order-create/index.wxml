@@ -44,7 +44,7 @@
               <view class="strong">{{item.nicknameText}}</view>
               <view class="badge" wx:if="{{item.sourceBadgeText}}">{{item.sourceBadgeText}}</view>
             </view>
-            <view class="muted small">电话：{{item.defaultPhone || '-'}}</view>
+            <view class="muted small">电话：{{item.defaultPhoneText || '-'}}</view>
             <view class="muted small">地址数：{{item.addressCount}}</view>
           </view>
         </view>
@@ -56,13 +56,13 @@
           </view>
           <view class="muted small" wx:if="{{selectedCustomer.sourceBadgeText}}">{{selectedCustomer.sourceBadgeText}}</view>
           <view class="muted small">客户ID：{{selectedCustomer.customerOpenId}}</view>
-          <view class="muted small">默认电话：{{selectedCustomer.defaultPhone || '-'}}</view>
+          <view class="muted small">默认电话：{{selectedCustomer.defaultPhoneText || '-'}}</view>
         </view>
       </block>
 
       <block wx:else>
         <input class="input" placeholder="店主代录客户昵称（必填）" value="{{newManualCustomerNickname}}" bindinput="onNewManualNicknameInput" />
-        <input class="input" placeholder="客户电话（可选，建议填）" value="{{newManualCustomerProfilePhone}}" bindinput="onNewManualProfilePhoneInput" />
+        <input class="input" type="number" placeholder="客户电话（可选，10位）" value="{{newManualCustomerProfilePhone}}" bindinput="onNewManualProfilePhoneInput" bindblur="onNewManualProfilePhoneBlur" />
         <view class="muted small">创建成功后会在“客人管理”中显示为“店主代录”客户。</view>
       </block>
     </view>
@@ -134,13 +134,13 @@
             <input class="input half" placeholder="邮编（5位）" data-key="postalCode" value="{{manualAddress.postalCode}}" bindinput="onManualAddressInput" />
             <input class="input half" placeholder="城市" data-key="city" value="{{manualAddress.city}}" bindinput="onManualAddressInput" />
           </view>
-          <input class="input" placeholder="配送联系电话（必填）" data-key="phone" value="{{manualAddress.phone}}" bindinput="onManualAddressInput" />
+          <input class="input" type="number" placeholder="配送联系电话（必填，10位）" data-key="phone" value="{{manualAddress.phone}}" bindinput="onManualAddressInput" bindblur="onManualAddressPhoneBlur" />
           <view class="muted small" wx:if="{{customerAction==='create_manual'}}">新建店主代录客户时，此配送地址会保存为客户默认地址。</view>
         </block>
       </block>
 
       <block wx:elif="{{fulfillmentTypeDraft==='pickup'}}">
-        <input class="input" placeholder="自取联系电话（必填）" value="{{pickupPhoneDraft}}" bindinput="onPickupPhoneInput" />
+        <input class="input" type="number" placeholder="自取联系电话（必填，10位）" value="{{pickupPhoneDraft}}" bindinput="onPickupPhoneInput" bindblur="onPickupPhoneBlur" />
       </block>
     </view>
 

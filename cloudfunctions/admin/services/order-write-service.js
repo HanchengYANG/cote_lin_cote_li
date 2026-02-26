@@ -259,12 +259,11 @@ function createOrderWriteService(deps) {
         }
 
         const currentPhone = normalizePhone(order.contact && order.contact.phone)
+        const nextContact = {
+          phone: hasPhoneInput ? requestedPhone : currentPhone,
+        }
         const nextData = {
           fulfillmentType,
-          // Use _.set to replace the whole object; direct nested merge fails when contact/address is null.
-          contact: _.set({
-            phone: hasPhoneInput ? requestedPhone : currentPhone,
-          }),
           updatedAt: db.serverDate(),
         }
         let addressSource = 'unchanged'
@@ -286,7 +285,7 @@ function createOrderWriteService(deps) {
             }
             nextAddressId = selectedSaved.id
             addressSource = 'addressId'
-            if (!nextData.contact.phone && isPhoneValid(selectedSaved.phone)) nextData.contact.phone = selectedSaved.phone
+            if (!nextContact.phone && isPhoneValid(selectedSaved.phone)) nextContact.phone = selectedSaved.phone
           } else if (requestedManualAddress) {
             nextAddress = {
               label: requestedManualAddress.label,
@@ -307,7 +306,9 @@ function createOrderWriteService(deps) {
             }
           }
           if (!nextAddress) return fail('BAD_REQUEST', '配送订单缺少有效地址')
-          if (!isPhoneValid(nextData.contact.phone)) return fail('INVALID_PHONE', '请填写有效电话')
+          if (!isPhoneValid(nextContact.phone)) return fail('INVALID_PHONE', '请填写有效电话')
+          // Use _.set to replace the whole object; direct nested merge fails when contact/address is null.
+          nextData.contact = _.set(nextContact)
           nextData.address = _.set(nextAddress)
           nextData.addressId = nextAddressId
 
@@ -326,6 +327,8 @@ function createOrderWriteService(deps) {
           nextData.acceptDeliverySlot = true
         } else {
           if (hasPhoneInput && requestedPhone && !isPhoneValid(requestedPhone)) return fail('INVALID_PHONE', '请填写有效电话')
+          // Use _.set to replace the whole object; direct nested merge fails when contact/address is null.
+          nextData.contact = _.set(nextContact)
           nextData.address = null
           nextData.addressId = null
           nextData.deliveryTimeSlotLabelSnapshot = null
@@ -343,12 +346,62 @@ function createOrderWriteService(deps) {
               from: String(order.fulfillmentType || ''),
               to: fulfillmentType,
               addressSource,
-              phoneChanged: nextData.contact.phone !== currentPhone,
+              phoneChanged: nextContact.phone !== currentPhone,
             },
           },
         })
       } catch (err) {
         return fail('TX_FAILED', 'Update fulfillment failed', String(err && err.message))
+      }
+      return ok({})
+    },
+
+    async updateOrderRemark(event, ctx) {
+      const openId = ctx && ctx.openId
+      const orderId = String((event && event.orderId) || '').trim()
+      if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
+      const remark = String((event && event.remark) || '').trim()
+      if (remark.length > 300) return fail('BAD_REQUEST', 'Remark too long')
+      try {
+        await db.runTransaction(async (tx) => {
+          let order = null
+          try {
+            const got = await tx.collection('orders').doc(orderId).get()
+            order = got && got.data
+          } catch (err) {
+            throwBiz('ORDER_NOT_FOUND', 'Order not found')
+          }
+          if (!order) throwBiz('ORDER_NOT_FOUND', 'Order not found')
+          if (order.status !== ORDER_STATUS.ACTIVE && order.status !== ORDER_STATUS.PENDING_REVIEW) {
+            throwBiz('ORDER_NOT_EDITABLE', 'Order is not editable')
+          }
+
+          const oldRemark = String((order && order.remark) || '').trim()
+          if (oldRemark === remark) return
+
+          const now = db.serverDate()
+          await tx.collection('orders').doc(orderId).update({
+            data: {
+              remark,
+              updatedAt: now,
+            },
+          })
+          await tx.collection('order_audit_logs').add({
+            data: {
+              orderId,
+              action: 'ADMIN_UPDATE_REMARK',
+              byOpenId: openId,
+              at: now,
+              detail: {
+                hadRemark: !!oldRemark,
+                cleared: !remark,
+              },
+            },
+          })
+        })
+      } catch (err) {
+        if (err && err.code) return fail(err.code, err.message || 'Request failed', err.detail)
+        return fail('TX_FAILED', 'Update remark failed', String(err && err.message))
       }
       return ok({})
     },

@@ -48,6 +48,10 @@ Component({
       type: Boolean,
       value: true,
     },
+    showRemark: {
+      type: Boolean,
+      value: true,
+    },
     editHint: {
       type: String,
       value: '',

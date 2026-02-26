@@ -1,7 +1,7 @@
 const { call } = require('../../utils/api')
 const { centToEuro } = require('../../utils/format')
 const { outOfStockMessage } = require('../../utils/order-errors')
-const { normalizePhone, isPhoneValid } = require('../../utils/phone')
+const { normalizePhone, normalizePhoneInputDigits, isPhoneValid, formatPhoneDisplay, formatPhoneBlurValue } = require('../../utils/phone')
 const { getSnapshot, invalidateSnapshot } = require('../../utils/app-snapshot')
 const { createPage } = require('../../utils/create-page')
 const { showResultError } = require('../../utils/error-feedback')
@@ -198,7 +198,7 @@ function buildReloadPatchWhenSaleUnavailable(options = {}) {
     preferredAddressId: options.preferredAddressId,
     profileDefaultAddressId: profile.defaultAddressId,
   })
-  const pickupPhone = normalizePhone(currentData.pickupPhone || '') || normalizePhone(profile && profile.profilePhone)
+  const pickupPhoneDigits = normalizePhone(currentData.pickupPhone || '') || normalizePhone(profile && profile.profilePhone)
   return {
     saleStatus: options.saleStatus,
     sale: options.sale,
@@ -212,7 +212,7 @@ function buildReloadPatchWhenSaleUnavailable(options = {}) {
     profile,
     addresses,
     selectedAddressId,
-    pickupPhone,
+    pickupPhone: formatPhoneDisplay(pickupPhoneDigits) || pickupPhoneDigits,
   }
 }
 
@@ -245,8 +245,8 @@ function buildReloadPatchWhenSaleOpen(options = {}) {
   }
 
   const selectedAddr = (Array.isArray(addresses) ? addresses : []).find((x) => x.id === selectedAddressId) || null
-  let pickupPhone = normalizePhone(currentData.pickupPhone || '') || normalizePhone(profile && profile.profilePhone)
-  if (!pickupPhone && selectedAddr && selectedAddr.phone) pickupPhone = normalizePhone(selectedAddr.phone)
+  let pickupPhoneDigits = normalizePhone(currentData.pickupPhone || '') || normalizePhone(profile && profile.profilePhone)
+  if (!pickupPhoneDigits && selectedAddr && selectedAddr.phone) pickupPhoneDigits = normalizePhone(selectedAddr.phone)
 
   if (existingOrder) {
     const method = String((existingOrder.payment && existingOrder.payment.method) || 'cash')
@@ -257,14 +257,14 @@ function buildReloadPatchWhenSaleOpen(options = {}) {
     next.paymentMethodLabel = PAYMENT_METHODS[methodIdx].label
     next.remark = String(existingOrder.remark || '')
     if (next.fulfillmentType === 'pickup') {
-      pickupPhone = normalizePhone(existingOrder && existingOrder.contact && existingOrder.contact.phone)
+      pickupPhoneDigits = normalizePhone(existingOrder && existingOrder.contact && existingOrder.contact.phone)
     }
   } else if ((addresses || []).length === 0) {
     next.fulfillmentType = 'pickup'
     next.acceptDeliverySlot = false
   }
 
-  next.pickupPhone = pickupPhone
+  next.pickupPhone = formatPhoneDisplay(pickupPhoneDigits) || pickupPhoneDigits
   return next
 }
 
@@ -273,7 +273,7 @@ function buildSelectedAddressView(data) {
   const currentId = String((data && data.selectedAddressId) || '').trim()
   const idx = arr.findIndex((x) => String((x && x.id) || '').trim() === currentId)
   const picked = idx >= 0 ? arr[idx] : null
-  const phoneText = picked ? normalizePhone(picked.phone || '') : ''
+  const phoneText = picked ? formatPhoneDisplay(picked.phone || '') : ''
   return {
     selectedAddressIndex: idx >= 0 ? idx : 0,
     selectedAddressTitle: picked ? String(picked.title || '') : '',
@@ -621,8 +621,12 @@ createPage({
   },
 
   onPickupPhoneInput(e) {
-    const v = normalizePhone(e && e.detail && e.detail.value)
+    const v = normalizePhoneInputDigits(e && e.detail && e.detail.value)
     setDataAndApplyCheckoutView(this, { pickupPhone: v })
+  },
+
+  onPickupPhoneBlur() {
+    setDataAndApplyCheckoutView(this, { pickupPhone: formatPhoneBlurValue(this.data.pickupPhone) })
   },
 
   onAddressPick(e) {

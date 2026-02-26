@@ -1,5 +1,6 @@
 const { call } = require('../../utils/api')
 const { invalidateSnapshot } = require('../../utils/app-snapshot')
+const { formatPhoneDisplay } = require('../../utils/phone')
 const { createPage } = require('../../utils/create-page')
 
 createPage({
@@ -44,7 +45,7 @@ createPage({
       ...a,
       title: String(a.label || '').trim() || `${String(a.line1 || '').trim()} ${String(a.city || '').trim()}`.trim(),
       detail: [a.line1, a.line2, a.postalCode, a.city, a.country].filter(Boolean).join(', '),
-      phoneText: String(a.phone || '').trim(),
+      phoneText: formatPhoneDisplay(a.phone),
       isDefault: String(p.defaultAddressId || '') === String(a.id || ''),
       isPicked: String(this.data.selectedAddressId || '') === String(a.id || ''),
     }))
