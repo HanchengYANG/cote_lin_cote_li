@@ -2,6 +2,7 @@ const { call } = require('../../../utils/api')
 const { formatTime, centToEuro } = require('../../../utils/format')
 const { formatPhoneDisplay } = require('../../../utils/phone')
 const { invalidateSnapshot } = require('../../../utils/app-snapshot')
+const { exportAndOpenOrderLabelsPdf } = require('../../../utils/order-label-export')
 const { createPage } = require('../../../utils/create-page')
 
 function buildSaleLabel(sale) {
@@ -86,6 +87,7 @@ createPage({
     deliveryCollapsed: false,
     pickupCollapsed: false,
     deliveryAppendedHint: '',
+    exportingLabelPdf: false,
   },
 
   onLoad(query) {
@@ -208,6 +210,23 @@ createPage({
 
   togglePickupCollapsed() {
     this.setData({ pickupCollapsed: !this.data.pickupCollapsed })
+  },
+
+  async onExportLabelsPdf() {
+    const saleId = String((this.data.sale && this.data.sale._id) || '').trim()
+    if (!saleId || this.data.exportingLabelPdf) return
+    if (this.data.loadingPrep || this.data.loadingSales || this.data.saving || this.data.markingPrepDone) return
+    this.setData({ exportingLabelPdf: true })
+    try {
+      await exportAndOpenOrderLabelsPdf({
+        sourceType: 'sale',
+        saleId,
+        includeDelivery: true,
+        includePickup: true,
+      })
+    } finally {
+      this.setData({ exportingLabelPdf: false })
+    }
   },
 
   onMoveUp(e) {

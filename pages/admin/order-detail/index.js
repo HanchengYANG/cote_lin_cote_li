@@ -11,6 +11,7 @@ const {
 const { normalizeFrAddress, isFrAddressValid } = require('../../../utils/fr-address')
 const { parseSlotLabel, buildSlotLabel } = require('../../../utils/delivery-slot')
 const { suggestAddressDirect } = require('../../../utils/address-suggest')
+const { exportAndOpenOrderLabelsPdf } = require('../../../utils/order-label-export')
 const { createPage } = require('../../../utils/create-page')
 const {
   decorateOrder,
@@ -179,6 +180,7 @@ createPage({
     showDishPicker: false,
     loadingDishPicker: false,
     allDishesForPick: [],
+    exportingLabelPdf: false,
   },
 
   onLoad(query) {
@@ -677,6 +679,20 @@ createPage({
 
   onRemarkInput(e) {
     this.setData({ remarkDraft: String((e && e.detail && e.detail.value) || '') })
+  },
+
+  async onExportLabelPdf() {
+    const orderId = String(this.data.orderId || '').trim()
+    if (!orderId || this.data.exportingLabelPdf) return
+    this.setData({ exportingLabelPdf: true })
+    try {
+      await exportAndOpenOrderLabelsPdf({
+        sourceType: 'order',
+        orderId,
+      })
+    } finally {
+      this.setData({ exportingLabelPdf: false })
+    }
   },
 
   async saveRemarkDraft() {

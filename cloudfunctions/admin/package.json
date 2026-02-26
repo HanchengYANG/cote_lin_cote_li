@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {
+    "pdfkit": "^0.14.0",
     "wx-server-sdk": "^2.6.3"
   }
 }
-

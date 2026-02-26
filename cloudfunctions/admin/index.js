@@ -21,6 +21,7 @@ const { createDashboardHandlers } = require('./handlers/dashboard')
 const { createFulfillmentReadHandlers } = require('./handlers/fulfillment-read')
 const { createFulfillmentWriteHandlers } = require('./handlers/fulfillment-write')
 const { createAdminReadHandlers } = require('./handlers/read-admin')
+const { createOrderLabelExportHandlers } = require('./handlers/order-label-export')
 const { createManualOrderReadHandlers } = require('./handlers/manual-order-read')
 const { createSaleHandlers } = require('./handlers/sale')
 const { createDishHandlers } = require('./handlers/dish')
@@ -670,6 +671,27 @@ exports.main = async (event) => {
   })
   if (adminReadHandlers[action]) {
     return adminReadHandlers[action](event, { openId })
+  }
+
+  const orderLabelExportHandlers = createOrderLabelExportHandlers({
+    cloud,
+    db,
+    ok,
+    fail,
+    ORDER_STATUS,
+    getSale,
+    getCustomersByOpenIds,
+    getActiveOrdersBySaleWithNicknames,
+    filterOrdersByFulfillmentType,
+    getSaleFulfillmentPlan,
+    buildFulfillmentOrderedOrders,
+    toEpochMs,
+    normalizePhone,
+    formatOrderAddress,
+    getTempUrlMap,
+  })
+  if (orderLabelExportHandlers[action]) {
+    return orderLabelExportHandlers[action](event, { openId })
   }
 
   const manualOrderReadHandlers = createManualOrderReadHandlers({

@@ -9,6 +9,16 @@
     </view>
 
     <view class="card" wx:if="{{order}}">
+      <view class="title">标签导出</view>
+      <view class="muted small">导出当前订单标签</view>
+      <view class="btn-row">
+        <button class="btn ghost" loading="{{exportingLabelPdf}}" disabled="{{exportingLabelPdf}}" bindtap="onExportLabelPdf">
+          导出本单标签 PDF
+        </button>
+      </view>
+    </view>
+
+    <view class="card" wx:if="{{order}}">
       <view class="title">交货方式设置</view>
       <radio-group bindchange="onFulfillmentChange">
         <label class="radio">

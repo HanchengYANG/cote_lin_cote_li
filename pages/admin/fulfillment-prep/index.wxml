@@ -27,6 +27,15 @@
           <view class="muted small warn" wx:if="{{!canEdit}}">该开单已完成，仅可查看排序结果</view>
           <view class="muted small warn" wx:if="{{canEdit && sale.status==='FULFILLING'}}">配送进行中，调整排序会影响后续执行顺序</view>
           <view class="muted small" wx:if="{{deliveryAppendedHint}}">{{deliveryAppendedHint}}</view>
+          <button
+            class="btn ghost"
+            loading="{{exportingLabelPdf}}"
+            disabled="{{loadingPrep || loadingSales || saving || markingPrepDone || exportingLabelPdf}}"
+            bindtap="onExportLabelsPdf"
+          >
+            导出标签
+          </button>
+          <view class="muted small">包含配送+自取；每单一格（A6），一页4单（A4）。</view>
         </view>
 
         <view class="card" wx:if="{{loadingPrep}}">
