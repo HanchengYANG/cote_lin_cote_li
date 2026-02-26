@@ -1,6 +1,6 @@
 const { call } = require('../../utils/api')
 const { invalidateSnapshot } = require('../../utils/app-snapshot')
-const { normalizePhone } = require('../../utils/phone')
+const { normalizePhone, normalizePhoneInputDigits, formatPhoneDisplay, formatPhoneBlurValue } = require('../../utils/phone')
 const { normalizeFrAddress, isFrAddressValid } = require('../../utils/fr-address')
 const { suggestAddressDirect } = require('../../utils/address-suggest')
 const { createPage } = require('../../utils/create-page')
@@ -72,15 +72,29 @@ createPage({
       return
     }
     this.setData({
-      address: normalizeAddress(found),
+      address: {
+        ...normalizeAddress(found),
+        phone: formatPhoneDisplay(found && found.phone) || normalizePhone(found && found.phone),
+      },
       setDefault: String(p.defaultAddressId || '') === addressId,
     })
   },
 
   onAddrInput(e) {
     const k = e.currentTarget.dataset.k
-    const address = { ...this.data.address, [k]: e.detail.value }
+    const nextValue =
+      k === 'phone' ? normalizePhoneInputDigits(e && e.detail && e.detail.value) : (e && e.detail && e.detail.value)
+    const address = { ...this.data.address, [k]: nextValue }
     this.setData({ address })
+  },
+
+  onPhoneBlur() {
+    this.setData({
+      address: {
+        ...this.data.address,
+        phone: formatPhoneBlurValue(this.data.address && this.data.address.phone),
+      },
+    })
   },
 
   onLine1Input(e) {

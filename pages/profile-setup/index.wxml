@@ -13,7 +13,7 @@
 
       <view class="card">
         <view class="title">联系电话</view>
-        <input class="input" placeholder="可选，店主会通过电话联系你" value="{{profilePhone}}" bindinput="onPhoneInput" bindblur="onPhoneBlur" />
+        <input class="input" type="number" placeholder="可选，填写10位电话（如 06 12 34 56 78）" value="{{profilePhone}}" bindinput="onPhoneInput" bindblur="onPhoneBlur" />
         <view class="muted small">填写后下单会自动带出。</view>
       </view>
 

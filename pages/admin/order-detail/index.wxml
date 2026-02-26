@@ -20,9 +20,9 @@
           <text>自取</text>
         </label>
       </radio-group>
-      <view class="field">
-        <view class="label">联系电话</view>
-        <input class="input" value="{{phoneDraft}}" placeholder="电话（如 +336...）" bindinput="onPhoneInput" />
+      <view class="field" wx:if="{{fulfillmentTypeDraft==='pickup'}}">
+        <view class="label">自取联系电话</view>
+        <input class="input" type="number" value="{{phoneDraft}}" placeholder="电话（10位，如 06 12 34 56 78）" bindinput="onPhoneInput" bindblur="onPhoneBlur" />
       </view>
       <view class="field" wx:if="{{fulfillmentTypeDraft==='delivery'}}">
         <view class="label">配送地址</view>
@@ -45,17 +45,39 @@
           <view class="muted small" wx:if="{{customerAddresses.length}}">
             {{customerAddresses[selectedAddressIndex].line1}} {{customerAddresses[selectedAddressIndex].line2}} {{customerAddresses[selectedAddressIndex].postalCode}} {{customerAddresses[selectedAddressIndex].city}} {{customerAddresses[selectedAddressIndex].country}}
           </view>
+          <input class="input" type="number" value="{{phoneDraft}}" placeholder="配送联系电话（必填，10位）" bindinput="onPhoneInput" bindblur="onPhoneBlur" />
         </view>
 
         <view wx:if="{{addressMode==='manual'}}">
           <input class="input" data-k="label" value="{{manualAddress.label}}" placeholder="地址标签（可选）" bindinput="onManualAddressInput" />
-          <input class="input" data-k="line1" value="{{manualAddress.line1}}" placeholder="街道地址 line1" bindinput="onManualAddressInput" />
+          <input
+            class="input"
+            data-k="line1"
+            value="{{manualAddress.line1}}"
+            placeholder="街道地址 line1（支持补全）"
+            bindinput="onManualAddressLine1Input"
+            bindfocus="onManualAddressLine1Focus"
+            bindblur="onManualAddressLine1Blur"
+          />
+          <view class="suggest-list" wx:if="{{manualAddressSuggestions.length>0}}">
+            <view
+              class="suggest-item"
+              wx:for="{{manualAddressSuggestions}}"
+              wx:key="index"
+              data-i="{{index}}"
+              bindtouchstart="onManualAddressSuggestionTouchStart"
+              bindtap="pickManualAddressSuggestion"
+            >
+              <view class="suggest-main">{{item.label}}</view>
+              <view class="suggest-sub">{{item.postalCode}} {{item.city}}</view>
+            </view>
+          </view>
           <input class="input" data-k="line2" value="{{manualAddress.line2}}" placeholder="补充信息 line2（可选）" bindinput="onManualAddressInput" />
           <view class="row2">
             <input class="input half" data-k="postalCode" value="{{manualAddress.postalCode}}" placeholder="邮编" bindinput="onManualAddressInput" />
             <input class="input half" data-k="city" value="{{manualAddress.city}}" placeholder="城市" bindinput="onManualAddressInput" />
           </view>
-          <input class="input" data-k="country" value="{{manualAddress.country}}" placeholder="国家（默认 FR）" bindinput="onManualAddressInput" />
+          <input class="input" type="number" value="{{phoneDraft}}" placeholder="配送联系电话（必填，10位）" bindinput="onPhoneInput" bindblur="onPhoneBlur" />
         </view>
       </view>
     </view>
@@ -138,6 +160,21 @@
       <view class="muted small" wx:if="{{!canEditProgressStatus}}">仅有效订单可修改收款状态与交货状态。</view>
     </view>
 
+    <view class="card" wx:if="{{order}}">
+      <view class="title">备注</view>
+      <block wx:if="{{canEditItems}}">
+        <textarea
+          class="textarea"
+          maxlength="300"
+          placeholder="可选：口味、门禁、付款说明等"
+          value="{{remarkDraft}}"
+          bindinput="onRemarkInput"
+        />
+        <view class="muted small">修改后点击“保存修改”生效</view>
+      </block>
+      <view class="muted small" wx:else>{{remarkDraft || '无备注'}}</view>
+    </view>
+
     <order-editor
       order="{{order}}"
       editable-items="{{editableItems}}"
@@ -151,6 +188,7 @@
       show-payment-status="{{true}}"
       show-fulfillment="{{false}}"
       show-contact="{{false}}"
+      show-remark="{{false}}"
       edit-hint="店主可直接修改本单菜品数量；如需整单作废请点“取消整单”。"
       lock-hint="订单已取消，不可编辑。"
       bindadditem="onOpenAddDishPicker"

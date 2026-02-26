@@ -1,7 +1,13 @@
 const { call } = require('../../../utils/api')
 const { invalidateSnapshot } = require('../../../utils/app-snapshot')
 const { centToEuro } = require('../../../utils/format')
-const { normalizePhone, isPhoneValid } = require('../../../utils/phone')
+const {
+  normalizePhone,
+  normalizePhoneInputDigits,
+  isPhoneValid,
+  formatPhoneDisplay,
+  formatPhoneBlurValue,
+} = require('../../../utils/phone')
 const { normalizeFrAddress, isFrAddressValid } = require('../../../utils/fr-address')
 const { suggestAddressDirect } = require('../../../utils/address-suggest')
 const { createPage } = require('../../../utils/create-page')
@@ -147,13 +153,15 @@ function decorateCustomerSummary(row) {
   const nickname = String((row && row.nickname) || '').trim()
   const defaultPhone = normalizePhone(row && row.defaultPhone)
   const profilePhone = normalizePhone(row && row.profilePhone)
+  const phoneForDisplay = defaultPhone || profilePhone || ''
   return {
     customerOpenId,
     nickname,
     nicknameText: nickname || '未设置昵称',
     isManualCreated: !!(row && row.isManualCreated),
     sourceBadgeText: row && row.isManualCreated ? '店主代录' : '',
-    defaultPhone: defaultPhone || profilePhone || '',
+    defaultPhone: phoneForDisplay,
+    defaultPhoneText: formatPhoneDisplay(phoneForDisplay) || phoneForDisplay || '',
     addressCount: Number((row && row.addressCount) || 0),
     defaultAddressText: String((row && row.defaultAddressText) || '').trim(),
     updatedAt: (row && row.updatedAt) || null,
@@ -188,7 +196,7 @@ function normalizeAddressOptionRow(addr, defaultAddressId) {
     id,
     title: title || '未命名地址',
     detail: formatAddressLine(addr),
-    phoneText: normalizePhone(addr && addr.phone),
+    phoneText: formatPhoneDisplay(addr && addr.phone),
     isDefault: id && id === String(defaultAddressId || '').trim(),
   }
 }
@@ -414,6 +422,8 @@ createPage({
       isManualCreated: !!(pickedRow && pickedRow.isManualCreated),
       sourceBadgeText: pickedRow && pickedRow.isManualCreated ? '店主代录' : '',
       defaultPhone: normalizePhone((selectedAddress && selectedAddress.phoneText) || (pickedRow && pickedRow.defaultPhone) || ''),
+      defaultPhoneText:
+        formatPhoneDisplay((selectedAddress && selectedAddress.phoneText) || (pickedRow && pickedRow.defaultPhone) || '') || '',
       addressCount: customerAddresses.length,
     }
     const patch = {
@@ -429,7 +439,7 @@ createPage({
       patch.addressModeIndex = patch.addressMode === 'manual' ? 1 : 0
     }
     if (this.data.fulfillmentTypeDraft === 'pickup' && !String(this.data.pickupPhoneDraft || '').trim()) {
-      patch.pickupPhoneDraft = normalizePhone(selectedCustomer.defaultPhone || '')
+      patch.pickupPhoneDraft = formatPhoneDisplay(selectedCustomer.defaultPhone || '') || normalizePhone(selectedCustomer.defaultPhone || '')
     }
     if (isStalePick()) return
     this.setData(patch)
@@ -447,7 +457,8 @@ createPage({
       patch.addressMode = forceManual ? 'manual' : this.data.addressMode
       patch.addressModeIndex = patch.addressMode === 'manual' ? 1 : 0
     } else if (!String(this.data.pickupPhoneDraft || '').trim() && this.data.selectedCustomer && this.data.selectedCustomer.defaultPhone) {
-      patch.pickupPhoneDraft = normalizePhone(this.data.selectedCustomer.defaultPhone)
+      patch.pickupPhoneDraft =
+        formatPhoneDisplay(this.data.selectedCustomer.defaultPhone) || normalizePhone(this.data.selectedCustomer.defaultPhone)
       patch.manualAddressSuggestions = []
       patch.manualAddressLine1Focused = false
     }
@@ -490,7 +501,8 @@ createPage({
   onManualAddressInput(e) {
     const key = String((e.currentTarget.dataset && e.currentTarget.dataset.key) || '')
     if (!key) return
-    const value = String((e && e.detail && e.detail.value) || '')
+    const rawValue = String((e && e.detail && e.detail.value) || '')
+    const value = key === 'phone' ? normalizePhoneInputDigits(rawValue) : rawValue
     this.setData({
       manualAddress: {
         ...(this.data.manualAddress || blankManualAddress()),
@@ -589,7 +601,11 @@ createPage({
   },
 
   onPickupPhoneInput(e) {
-    this.setData({ pickupPhoneDraft: String((e && e.detail && e.detail.value) || '') })
+    this.setData({ pickupPhoneDraft: normalizePhoneInputDigits(e && e.detail && e.detail.value) })
+  },
+
+  onPickupPhoneBlur() {
+    this.setData({ pickupPhoneDraft: formatPhoneBlurValue(this.data.pickupPhoneDraft) })
   },
 
   onNewManualNicknameInput(e) {
@@ -597,7 +613,20 @@ createPage({
   },
 
   onNewManualProfilePhoneInput(e) {
-    this.setData({ newManualCustomerProfilePhone: String((e && e.detail && e.detail.value) || '') })
+    this.setData({ newManualCustomerProfilePhone: normalizePhoneInputDigits(e && e.detail && e.detail.value) })
+  },
+
+  onNewManualProfilePhoneBlur() {
+    this.setData({ newManualCustomerProfilePhone: formatPhoneBlurValue(this.data.newManualCustomerProfilePhone) })
+  },
+
+  onManualAddressPhoneBlur() {
+    this.setData({
+      manualAddress: {
+        ...(this.data.manualAddress || blankManualAddress()),
+        phone: formatPhoneBlurValue(this.data.manualAddress && this.data.manualAddress.phone),
+      },
+    })
   },
 
   onPickPaymentMethod(e) {

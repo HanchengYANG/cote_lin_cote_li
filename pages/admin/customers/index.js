@@ -1,5 +1,6 @@
 const { call } = require('../../../utils/api')
 const { formatTime } = require('../../../utils/format')
+const { formatPhoneDisplay } = require('../../../utils/phone')
 const { createPage } = require('../../../utils/create-page')
 
 function asText(v, fallback = '-') {
@@ -29,7 +30,7 @@ createPage({
     const customers = rows.map((it) => ({
       ...it,
       nicknameText: asText(it.nickname, '未设置昵称'),
-      phoneText: asText(it.defaultPhone),
+      phoneText: formatPhoneDisplay(it.defaultPhone) || '-',
       openIdText: asText(it.customerOpenId),
       lastOrderAtText: it.lastOrderAt ? formatTime(it.lastOrderAt) : '-',
       orderCountText: Number(it.orderCount || 0),

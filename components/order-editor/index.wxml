@@ -71,7 +71,7 @@
     <view class="muted small" wx:if="{{showPaymentStatus}}">状态：{{order.payment && order.payment.paidStatus ? order.payment.paidStatus : '-'}}</view>
   </view>
 
-  <view class="card" wx:if="{{order.remark}}">
+  <view class="card" wx:if="{{showRemark && order.remark}}">
     <view class="title">备注</view>
     <view class="muted small">{{order.remark}}</view>
   </view>

@@ -1,5 +1,5 @@
 const { call } = require('../../utils/api')
-const { normalizePhone, isPhoneValid } = require('../../utils/phone')
+const { normalizePhone, normalizePhoneInputDigits, isPhoneValid, formatPhoneDisplay, formatPhoneBlurValue } = require('../../utils/phone')
 const { invalidateSnapshot } = require('../../utils/app-snapshot')
 const { createPage } = require('../../utils/create-page')
 const { decorateOrderSummary } = require('../../utils/order-list')
@@ -15,7 +15,7 @@ function buildDefaultAddressDisplay(address) {
   const parts = [address.line1, address.line2, address.postalCode, address.city, address.country]
     .map((x) => String(x || '').trim())
     .filter(Boolean)
-  const phone = String(address.phone || '').trim()
+  const phone = formatPhoneDisplay(address && address.phone)
   const detail = [
     parts.join(', '),
     phone ? `电话：${phone}` : '',
@@ -91,7 +91,7 @@ createPage({
     const profilePhone = String(p.profilePhone || '')
     this.setData({
       nickname,
-      profilePhone,
+      profilePhone: formatPhoneDisplay(profilePhone) || profilePhone,
       savedNickname: nickname.trim(),
       savedProfilePhone: normalizePhone(profilePhone),
       defaultAddressTitle: addressDisplay.title,
@@ -106,7 +106,7 @@ createPage({
   },
 
   onPhoneInput(e) {
-    const profilePhone = normalizePhone(e && e.detail && e.detail.value)
+    const profilePhone = normalizePhoneInputDigits(e && e.detail && e.detail.value)
     this.setData({ profilePhone })
   },
 
@@ -115,6 +115,7 @@ createPage({
   },
 
   onPhoneBlur() {
+    this.setData({ profilePhone: formatPhoneBlurValue(this.data.profilePhone) })
     this.saveProfileIfChanged('phone')
   },
 
@@ -150,7 +151,7 @@ createPage({
     invalidateSnapshot()
     this.setData({
       nickname,
-      profilePhone,
+      profilePhone: formatPhoneDisplay(profilePhone) || profilePhone,
       savedNickname: nickname,
       savedProfilePhone: profilePhone,
     })

@@ -1,5 +1,6 @@
 const { call } = require('../../../utils/api')
 const { formatTime, centToEuro } = require('../../../utils/format')
+const { formatPhoneDisplay } = require('../../../utils/phone')
 const { invalidateSnapshot } = require('../../../utils/app-snapshot')
 const { createPage } = require('../../../utils/create-page')
 
@@ -47,6 +48,7 @@ function decoratePrepOrder(order) {
     customerNameText: String(o.customerNickname || '').trim() || '匿名客户',
     fulfillmentText: isPickup ? '自取' : '配送',
     addressDisplay: isPickup ? '自取' : String(o.addressText || '').trim() || '地址未填写',
+    phoneText: formatPhoneDisplay(o && o.contact && o.contact.phone) || '-',
   }
 }
 

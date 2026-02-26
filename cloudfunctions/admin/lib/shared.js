@@ -44,14 +44,11 @@ function parseAndValidateDeliverySlot(event) {
 }
 
 function normalizePhone(phone) {
-  return String(phone || '')
-    .trim()
-    .replace(/[.\-\s]/g, '')
+  return String(phone || '').replace(/\D/g, '')
 }
 
 function isPhoneValid(phone) {
-  const s = String(phone || '').trim()
-  return /^(\+?\d{6,20})$/.test(s)
+  return /^\d{10}$/.test(normalizePhone(phone))
 }
 
 function normalizeAddressPayload(input) {
