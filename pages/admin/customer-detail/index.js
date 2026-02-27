@@ -31,6 +31,10 @@ createPage({
     } catch (err) {}
     customerOpenId = customerOpenId.trim()
     this.setData({ customerOpenId })
+  },
+
+  onShow() {
+    if (!this.data.customerOpenId) return
     this.reload()
   },
 
@@ -87,5 +91,11 @@ createPage({
     const orderId = String((e.currentTarget.dataset && e.currentTarget.dataset.id) || '').trim()
     if (!orderId) return
     wx.navigateTo({ url: `/pages/admin/order-detail/index?orderId=${encodeURIComponent(orderId)}` })
+  },
+
+  goAddressBook() {
+    const customerOpenId = String(this.data.customerOpenId || '').trim()
+    if (!customerOpenId) return
+    wx.navigateTo({ url: `/pages/admin/customer-address-book/index?customerOpenId=${encodeURIComponent(customerOpenId)}` })
   },
 })

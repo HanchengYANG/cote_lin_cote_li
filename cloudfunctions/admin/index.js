@@ -679,6 +679,9 @@ exports.main = async (event) => {
     toEpochMs,
     toSafeInt,
     normalizePhone,
+    isPhoneValid,
+    normalizeAddressPayload,
+    buildAddressId,
     formatOrderAddress,
     normalizeStoredAddresses,
   })

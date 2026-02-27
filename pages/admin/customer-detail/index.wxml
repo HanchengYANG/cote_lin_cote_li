@@ -16,7 +16,10 @@
       </view>
 
       <view class="card">
-        <view class="title">地址列表</view>
+        <view class="head-row">
+          <view class="title">地址列表</view>
+          <button class="btn mini ghost" bindtap="goAddressBook">管理地址簿</button>
+        </view>
         <view class="muted small" wx:if="{{customer.addresses.length===0}}">暂无地址</view>
         <view class="addr" wx:for="{{customer.addresses}}" wx:key="id">
           <view class="addr-top">

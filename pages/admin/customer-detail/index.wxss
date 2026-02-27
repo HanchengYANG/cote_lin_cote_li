@@ -28,6 +28,16 @@ page {
   margin-bottom: 12rpx;
 }
 
+.head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.head-row .title {
+  margin-bottom: 0;
+}
+
 .muted {
   color: rgba(0, 0, 0, 0.55);
 }
@@ -109,4 +119,28 @@ page {
 .tag.reject {
   background: rgba(107, 114, 128, 0.14);
   color: #4b5563;
+}
+
+.btn {
+  background: #111;
+  color: #fff;
+  border-radius: 18rpx;
+  height: 88rpx;
+  line-height: 88rpx;
+}
+
+.btn.mini {
+  width: auto;
+  min-width: 160rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  padding: 0 16rpx;
+  border-radius: 12rpx;
+  font-size: 24rpx;
+}
+
+.btn.ghost {
+  background: transparent;
+  color: #111;
+  border: 1rpx solid rgba(0, 0, 0, 0.18);
 }

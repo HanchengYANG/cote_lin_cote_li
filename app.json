@@ -19,6 +19,8 @@
     "pages/admin/pending-orders/index",
     "pages/admin/customers/index",
     "pages/admin/customer-detail/index",
+    "pages/admin/customer-address-book/index",
+    "pages/admin/customer-address-edit/index",
     "pages/admin/manual-order-create/index",
     "pages/admin/order-detail/index",
     "pages/admin/production/index",

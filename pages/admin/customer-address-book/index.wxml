@@ -1,0 +1,38 @@
+<navigation-bar title="客人地址簿" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<sync-guard ready="{{isReady}}" error="{{syncError}}" bindretry="onSyncRetry"></sync-guard>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="page">
+    <view class="card" wx:if="{{loadPhase!=='ready'}}">
+      <view class="muted">载入中...</view>
+    </view>
+
+    <block wx:else>
+      <view class="card" wx:if="{{customer}}">
+        <view class="title">客人信息</view>
+        <view class="muted small">昵称：{{customer.nicknameText}}</view>
+        <view class="muted small">OpenID：{{customer.openIdText}}</view>
+      </view>
+
+      <view class="card" wx:if="{{addresses.length===0}}">
+        <view class="muted">还没有地址，先新增一个吧。</view>
+      </view>
+      <block wx:else>
+        <view class="card" wx:for="{{addresses}}" wx:key="id">
+          <view class="row">
+            <view class="title">{{item.title}}</view>
+            <view class="tag" wx:if="{{item.isDefault}}">默认</view>
+          </view>
+          <view class="muted small">{{item.detail}}</view>
+          <view class="muted small" wx:if="{{item.phoneText}}">电话：{{item.phoneText}}</view>
+          <view class="ops">
+            <button class="btn ghost mini" data-id="{{item.id}}" bindtap="goEdit">编辑</button>
+            <button class="btn ghost mini" wx:if="{{!item.isDefault}}" data-id="{{item.id}}" bindtap="setDefault">设默认</button>
+            <button class="btn danger mini" data-id="{{item.id}}" bindtap="remove">删除</button>
+          </view>
+        </view>
+      </block>
+
+      <button class="btn" bindtap="goAdd">新增地址</button>
+    </block>
+  </view>
+</scroll-view>
