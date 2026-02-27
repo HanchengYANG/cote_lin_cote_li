@@ -8,6 +8,47 @@ function normalizeLimit(limit, fallback = 5) {
   return Math.max(1, Math.min(10, Math.floor(n)))
 }
 
+function normalizeLine1Text(input) {
+  const parts = String(input || '').trim().split(/\s+/).filter(Boolean)
+  if (parts.length >= 2 && String(parts[0]).toLowerCase() === String(parts[1]).toLowerCase()) {
+    parts.splice(1, 1)
+  }
+  return parts.join(' ')
+}
+
+function escapeRegExp(input) {
+  return String(input || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function extractLine1FromLabel(label, postalCode, city) {
+  const rawLabel = String(label || '').trim()
+  const code = String(postalCode || '').trim()
+  const cityText = String(city || '').trim()
+  if (!rawLabel) return ''
+  let extracted = ''
+  if (code && cityText) {
+    const cityPattern = escapeRegExp(cityText).replace(/\s+/g, '\\s+')
+    const suffix = new RegExp(`\\s*,?\\s*${escapeRegExp(code)}\\s+${cityPattern}\\s*$`, 'i')
+    const withoutSuffix = rawLabel.replace(suffix, '').trim()
+    if (withoutSuffix && withoutSuffix !== rawLabel) extracted = withoutSuffix
+  }
+  if (!extracted && code) {
+    const marker = ` ${code} `
+    const idx = rawLabel.lastIndexOf(marker)
+    if (idx > 0) extracted = rawLabel.slice(0, idx).trim()
+  }
+  return extracted ? normalizeLine1Text(extracted) : ''
+}
+
+function line1FromSuggestion(suggestion) {
+  const s = suggestion || {}
+  const line1 = normalizeLine1Text(String(s.line1 || '').trim())
+  const fromLabel = extractLine1FromLabel(s.label, s.postalCode, s.city)
+  if (fromLabel) return fromLabel
+  if (line1) return line1
+  return normalizeLine1Text(String(s.label || '').trim())
+}
+
 function buildSuggestionLine1(props) {
   const p = props || {}
   const house = String(p.housenumber || '').trim()
@@ -20,19 +61,16 @@ function buildSuggestionLine1(props) {
     line1 = startsWithHouse ? street : `${house} ${street}`.trim()
   }
   if (!line1) line1 = String(p.label || '').trim()
-  const parts = line1.split(/\s+/).filter(Boolean)
-  if (parts.length >= 2 && String(parts[0]).toLowerCase() === String(parts[1]).toLowerCase()) {
-    parts.splice(1, 1)
-    line1 = parts.join(' ')
-  }
-  return String(line1 || '').trim()
+  return normalizeLine1Text(line1)
 }
 
 function mapFeatureToSuggestion(feature) {
   const p = (feature && feature.properties) || {}
-  const line1 = buildSuggestionLine1(p)
+  const line1ByProps = buildSuggestionLine1(p)
+  const label = String(p.label || line1ByProps).trim()
+  const line1 = extractLine1FromLabel(label, p.postcode, p.city) || line1ByProps
   return {
-    label: String(p.label || line1).trim(),
+    label,
     line1,
     postalCode: String(p.postcode || '').trim(),
     city: String(p.city || '').trim(),
@@ -80,4 +118,5 @@ async function suggestAddressDirect(q, limit = 5) {
 
 module.exports = {
   suggestAddressDirect,
+  line1FromSuggestion,
 }

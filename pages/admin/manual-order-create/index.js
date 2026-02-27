@@ -9,7 +9,7 @@ const {
   formatPhoneBlurValue,
 } = require('../../../utils/phone')
 const { normalizeFrAddress, isFrAddressValid } = require('../../../utils/fr-address')
-const { suggestAddressDirect } = require('../../../utils/address-suggest')
+const { suggestAddressDirect, line1FromSuggestion } = require('../../../utils/address-suggest')
 const { createPage } = require('../../../utils/create-page')
 const { calcEditableTotals, buildPayloadItems } = require('../../../utils/order-editor')
 
@@ -80,15 +80,6 @@ function buildAddDishOptionsFromSaleDishes(saleDishes) {
         d && d.inCurrentSale ? '' : '（未在本期开单）'
       }`,
     }))
-}
-
-function line1FromSuggestion(suggestion) {
-  const raw = String((suggestion && (suggestion.line1 || suggestion.label)) || '').trim()
-  const parts = raw.split(/\s+/).filter(Boolean)
-  if (parts.length >= 2 && String(parts[0]).toLowerCase() === String(parts[1]).toLowerCase()) {
-    parts.splice(1, 1)
-  }
-  return parts.join(' ')
 }
 
 function buildEditableItemsFromSaleDishes(saleDishes) {
@@ -288,6 +279,7 @@ createPage({
     this._manualAddrSuggestReqId = 0
     this._manualAddrSuggestTimer = null
     this._isPickingManualAddrSuggestion = false
+    this._ignoreNextManualAddrLine1Input = null
     this.reload()
   },
 
@@ -295,6 +287,7 @@ createPage({
     if (this._manualAddrSuggestTimer) clearTimeout(this._manualAddrSuggestTimer)
     this._manualAddrSuggestTimer = null
     this._isPickingManualAddrSuggestion = false
+    this._ignoreNextManualAddrLine1Input = null
   },
 
   onPullDownRefresh() {
@@ -337,6 +330,7 @@ createPage({
     const idx = safePickerIndex(e && e.detail && e.detail.value, CUSTOMER_ACTION_OPTIONS)
     const picked = CUSTOMER_ACTION_OPTIONS[idx]
     const nextAction = picked.value
+    this._ignoreNextManualAddrLine1Input = null
     const patch = {
       customerActionIndex: idx,
       customerAction: nextAction,
@@ -456,11 +450,14 @@ createPage({
       const forceManual = this.data.customerAction === 'create_manual' || this.data.customerAddresses.length === 0
       patch.addressMode = forceManual ? 'manual' : this.data.addressMode
       patch.addressModeIndex = patch.addressMode === 'manual' ? 1 : 0
-    } else if (!String(this.data.pickupPhoneDraft || '').trim() && this.data.selectedCustomer && this.data.selectedCustomer.defaultPhone) {
-      patch.pickupPhoneDraft =
-        formatPhoneDisplay(this.data.selectedCustomer.defaultPhone) || normalizePhone(this.data.selectedCustomer.defaultPhone)
+    } else {
+      this._ignoreNextManualAddrLine1Input = null
       patch.manualAddressSuggestions = []
       patch.manualAddressLine1Focused = false
+      if (!String(this.data.pickupPhoneDraft || '').trim() && this.data.selectedCustomer && this.data.selectedCustomer.defaultPhone) {
+        patch.pickupPhoneDraft =
+          formatPhoneDisplay(this.data.selectedCustomer.defaultPhone) || normalizePhone(this.data.selectedCustomer.defaultPhone)
+      }
     }
     this.setData(patch)
   },
@@ -484,7 +481,11 @@ createPage({
       this._manualAddrSuggestTimer = null
       this._manualAddrSuggestReqId = (this._manualAddrSuggestReqId || 0) + 1
       this._isPickingManualAddrSuggestion = false
-      this.setData({ manualAddressSuggestions: [], manualAddressLine1Focused: false })
+      this._ignoreNextManualAddrLine1Input = null
+      this.setData({
+        manualAddressSuggestions: [],
+        manualAddressLine1Focused: false,
+      })
     }
   },
 
@@ -512,14 +513,19 @@ createPage({
   },
 
   onManualAddressLine1Input(e) {
+    if (this._isPickingManualAddrSuggestion) return
     const value = String((e && e.detail && e.detail.value) || '')
+    const ignore = this._ignoreNextManualAddrLine1Input
+    if (ignore) {
+      this._ignoreNextManualAddrLine1Input = null
+      if (value === String(ignore.value || '')) return
+    }
     this.setData({
       manualAddress: {
         ...(this.data.manualAddress || blankManualAddress()),
         line1: value,
       },
     })
-    if (this._isPickingManualAddrSuggestion) return
     if (this.data.fulfillmentTypeDraft !== 'delivery') return
     const usingManualAddress =
       this.data.customerAction === 'create_manual' ||
@@ -530,6 +536,7 @@ createPage({
   },
 
   onManualAddressLine1Focus() {
+    this._ignoreNextManualAddrLine1Input = null
     this.setData({ manualAddressLine1Focused: true })
   },
 
@@ -580,6 +587,7 @@ createPage({
       return
     }
     const current = this.data.manualAddress || blankManualAddress()
+    const previousLine1 = String(current.line1 || '')
     const nextLine1 = line1FromSuggestion(s)
     this.setData({
       manualAddress: {
@@ -591,10 +599,12 @@ createPage({
       manualAddressSuggestions: [],
       manualAddressLine1Focused: false,
     })
+    this._ignoreNextManualAddrLine1Input = {
+      value: previousLine1,
+    }
     const clearPickingFlag = () => {
       this._isPickingManualAddrSuggestion = false
     }
-    setTimeout(clearPickingFlag, 120)
     wx.hideKeyboard({
       complete: clearPickingFlag,
     })
@@ -727,7 +737,8 @@ createPage({
         payload.addressMode = 'saved'
         payload.addressId = addressId
       } else {
-        const manualAddress = buildAddressPayloadForSubmit(this.data.manualAddress)
+        const manualAddressDraft = this.data.manualAddress || blankManualAddress()
+        const manualAddress = buildAddressPayloadForSubmit(manualAddressDraft)
         if (!manualAddress || !isFrAddressValid(manualAddress, { requirePhone: true, requireLabel: false })) {
           return { ok: false, message: '请填写完整且有效的配送地址与电话' }
         }

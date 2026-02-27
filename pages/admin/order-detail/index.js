@@ -10,7 +10,7 @@ const {
 } = require('../../../utils/phone')
 const { normalizeFrAddress, isFrAddressValid } = require('../../../utils/fr-address')
 const { parseSlotLabel, buildSlotLabel } = require('../../../utils/delivery-slot')
-const { suggestAddressDirect } = require('../../../utils/address-suggest')
+const { suggestAddressDirect, line1FromSuggestion } = require('../../../utils/address-suggest')
 const { exportAndOpenOrderLabelsPdf } = require('../../../utils/order-label-export')
 const { createPage } = require('../../../utils/create-page')
 const {
@@ -101,15 +101,6 @@ function toDishPickerOption(d) {
   }
 }
 
-function line1FromSuggestion(suggestion) {
-  const raw = String((suggestion && (suggestion.line1 || suggestion.label)) || '').trim()
-  const parts = raw.split(/\s+/).filter(Boolean)
-  if (parts.length >= 2 && String(parts[0]).toLowerCase() === String(parts[1]).toLowerCase()) {
-    parts.splice(1, 1)
-  }
-  return parts.join(' ')
-}
-
 function normalizeManualAddress(input) {
   const normalized = normalizeFrAddress(input) || {}
   return {
@@ -187,6 +178,7 @@ createPage({
     this._manualAddrSuggestReqId = 0
     this._manualAddrSuggestTimer = null
     this._isPickingManualAddrSuggestion = false
+    this._ignoreNextManualAddrLine1Input = null
     const orderId = (query && query.orderId) || ''
     this.setData({ orderId })
     this.reload()
@@ -196,6 +188,7 @@ createPage({
     if (this._manualAddrSuggestTimer) clearTimeout(this._manualAddrSuggestTimer)
     this._manualAddrSuggestTimer = null
     this._isPickingManualAddrSuggestion = false
+    this._ignoreNextManualAddrLine1Input = null
   },
 
   async reload() {
@@ -232,6 +225,7 @@ createPage({
     const handoffStatusIndex = HANDOFF_STATUS_OPTIONS.findIndex((it) => it.value === normalizedHandoffStatus)
     const rawStatus = String((rawOrder && rawOrder.status) || '').trim()
     const remarkDraft = String((rawOrder && rawOrder.remark) || '')
+    this._ignoreNextManualAddrLine1Input = null
     this.setData({
       order,
       canEditItems,
@@ -523,6 +517,7 @@ createPage({
       this._manualAddrSuggestTimer = null
       this._manualAddrSuggestReqId = (this._manualAddrSuggestReqId || 0) + 1
       this._isPickingManualAddrSuggestion = false
+      this._ignoreNextManualAddrLine1Input = null
       patch.manualAddressSuggestions = []
       patch.manualAddressLine1Focused = false
     }
@@ -543,6 +538,7 @@ createPage({
       this._manualAddrSuggestTimer = null
       this._manualAddrSuggestReqId = (this._manualAddrSuggestReqId || 0) + 1
       this._isPickingManualAddrSuggestion = false
+      this._ignoreNextManualAddrLine1Input = null
       patch.manualAddressSuggestions = []
       patch.manualAddressLine1Focused = false
     }
@@ -594,20 +590,26 @@ createPage({
   },
 
   onManualAddressLine1Input(e) {
+    if (this._isPickingManualAddrSuggestion) return
     const value = String((e && e.detail && e.detail.value) || '')
+    const ignore = this._ignoreNextManualAddrLine1Input
+    if (ignore) {
+      this._ignoreNextManualAddrLine1Input = null
+      if (value === String(ignore.value || '')) return
+    }
     this.setData({
       manualAddress: {
         ...(this.data.manualAddress || {}),
         line1: value,
       },
     })
-    if (this._isPickingManualAddrSuggestion) return
     if (this.data.fulfillmentTypeDraft !== 'delivery') return
     if (this.data.addressMode !== 'manual') return
     this.debouncedManualAddressSuggest(value)
   },
 
   onManualAddressLine1Focus() {
+    this._ignoreNextManualAddrLine1Input = null
     this.setData({ manualAddressLine1Focused: true })
   },
 
@@ -658,6 +660,7 @@ createPage({
       return
     }
     const current = this.data.manualAddress || {}
+    const previousLine1 = String(current.line1 || '')
     this.setData({
       manualAddress: {
         ...current,
@@ -668,10 +671,12 @@ createPage({
       manualAddressSuggestions: [],
       manualAddressLine1Focused: false,
     })
+    this._ignoreNextManualAddrLine1Input = {
+      value: previousLine1,
+    }
     const clearPickingFlag = () => {
       this._isPickingManualAddrSuggestion = false
     }
-    setTimeout(clearPickingFlag, 120)
     wx.hideKeyboard({
       complete: clearPickingFlag,
     })
@@ -749,7 +754,7 @@ createPage({
         payload.addressId = addressId
         nextAddressCompareKey = JSON.stringify({ mode: 'saved', addressId, address: null })
       } else {
-        const manualAddress = normalizeManualAddress(this.data.manualAddress)
+        const manualAddress = normalizeManualAddress(this.data.manualAddress || {})
         if (!isManualAddressValid(manualAddress)) {
           wx.showToast({ title: '请填写完整法国地址', icon: 'none' })
           return { ok: false, changed: false }

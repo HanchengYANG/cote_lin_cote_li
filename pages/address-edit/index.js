@@ -2,7 +2,7 @@ const { call } = require('../../utils/api')
 const { invalidateSnapshot } = require('../../utils/app-snapshot')
 const { normalizePhone, normalizePhoneInputDigits, formatPhoneDisplay, formatPhoneBlurValue } = require('../../utils/phone')
 const { normalizeFrAddress, isFrAddressValid } = require('../../utils/fr-address')
-const { suggestAddressDirect } = require('../../utils/address-suggest')
+const { suggestAddressDirect, line1FromSuggestion } = require('../../utils/address-suggest')
 const { createPage } = require('../../utils/create-page')
 
 function normalizeAddress(a) {
@@ -16,15 +16,6 @@ function normalizeAddress(a) {
     phone: '',
     country: 'FR',
   }
-}
-
-function line1FromSuggestion(suggestion) {
-  const raw = String((suggestion && (suggestion.line1 || suggestion.label)) || '').trim()
-  const parts = raw.split(/\s+/).filter(Boolean)
-  if (parts.length >= 2 && String(parts[0]).toLowerCase() === String(parts[1]).toLowerCase()) {
-    parts.splice(1, 1)
-  }
-  return parts.join(' ')
 }
 
 createPage({
@@ -51,6 +42,7 @@ createPage({
     this._suggestReqId = 0
     this._timer = null
     this._isPickingSuggestion = false
+    this._ignoreNextLine1Input = null
     const addressId = String((query && query.addressId) || '').trim()
     this.setData({
       addressId,
@@ -98,14 +90,20 @@ createPage({
   },
 
   onLine1Input(e) {
-    const value = e.detail.value
+    if (this._isPickingSuggestion) return
+    const value = String((e && e.detail && e.detail.value) || '')
+    const ignore = this._ignoreNextLine1Input
+    if (ignore) {
+      this._ignoreNextLine1Input = null
+      if (value === String(ignore.value || '')) return
+    }
     const address = { ...this.data.address, line1: value }
     this.setData({ address })
-    if (this._isPickingSuggestion) return
     this.debouncedSuggest(value)
   },
 
   onLine1Focus() {
+    this._ignoreNextLine1Input = null
     this.setData({ line1Focused: true })
   },
 
@@ -155,6 +153,7 @@ createPage({
       this._isPickingSuggestion = false
       return
     }
+    const previousLine1 = String((this.data.address && this.data.address.line1) || '')
     const nextLine1 = line1FromSuggestion(s)
     const address = {
       ...this.data.address,
@@ -167,6 +166,9 @@ createPage({
       suggestions: [],
       line1Focused: false,
     })
+    this._ignoreNextLine1Input = {
+      value: previousLine1,
+    }
     wx.hideKeyboard({
       complete: () => {
         this._isPickingSuggestion = false
@@ -178,6 +180,7 @@ createPage({
     if (this._timer) clearTimeout(this._timer)
     this._timer = null
     this._isPickingSuggestion = false
+    this._ignoreNextLine1Input = null
   },
 
   onSetDefault(e) {
