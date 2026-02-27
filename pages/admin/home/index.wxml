@@ -205,6 +205,10 @@
               <text class="quick-icon">✅</text>
               <text class="quick-label">完成本次开单</text>
             </view>
+            <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="goProduction">
+              <text class="quick-icon">🍳</text>
+              <text class="quick-label">生产管理</text>
+            </view>
             <view class="quick-item surface-tile" hover-class="quick-item-hover" bindtap="goFulfillmentRun">
               <text class="quick-icon">🛵</text>
               <text class="quick-label">配送执行</text>
