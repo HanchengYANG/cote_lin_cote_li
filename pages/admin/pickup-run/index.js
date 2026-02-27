@@ -4,6 +4,6 @@ createRunPage({
   listSalesAction: 'listPickupSales',
   getRunAction: 'getPickupRun',
   enableGoogleNav: false,
-  emptySelectorLabel: '暂无可自取执行开单',
+  splitByDelivered: true,
   preferredStatuses: ['OPEN', 'CLOSED', 'FULFILLING'],
 })

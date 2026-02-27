@@ -149,6 +149,12 @@ page {
   border-color: rgba(2, 122, 72, 0.16);
 }
 
+.tag.delivery-done {
+  color: #344054;
+  background: #f2f4f7;
+  border-color: rgba(71, 84, 103, 0.2);
+}
+
 .address {
   color: rgba(0, 0, 0, 0.66);
   font-size: 24rpx;

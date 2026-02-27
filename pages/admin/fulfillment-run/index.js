@@ -4,7 +4,7 @@ createRunPage({
   listSalesAction: 'listFulfillmentSales',
   getRunAction: 'getSaleFulfillmentRun',
   enableGoogleNav: true,
-  emptySelectorLabel: '暂无可配送执行开单',
+  splitByDelivered: true,
   preferredStatuses: ['CLOSED', 'FULFILLING'],
   appendedHintFormatter(count) {
     return `有 ${count} 个新配送单已自动追加到末尾`

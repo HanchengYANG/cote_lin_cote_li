@@ -53,6 +53,33 @@ function decoratePrepOrder(order) {
   }
 }
 
+function splitDeliveryOrders(orders) {
+  const arr = Array.isArray(orders) ? orders : []
+  const pending = []
+  const completed = []
+  for (const order of arr) {
+    if (String(order && order.handoffStatus || '').trim() === 'DELIVERED') {
+      completed.push(order)
+      continue
+    }
+    pending.push(order)
+  }
+  return { pending, completed }
+}
+
+function uniqueOrderIds(orders) {
+  const arr = Array.isArray(orders) ? orders : []
+  const seen = new Set()
+  const out = []
+  for (const order of arr) {
+    const id = String((order && order._id) || '').trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
+  }
+  return out
+}
+
 function moveItem(arr, from, to) {
   if (!Array.isArray(arr)) return []
   if (from < 0 || from >= arr.length || to < 0 || to >= arr.length || from === to) return arr.slice()
@@ -83,9 +110,11 @@ createPage({
     sale: null,
     canEdit: false,
     deliveryOrders: [],
+    completedDeliveryOrders: [],
     pickupOrders: [],
     deliveryCollapsed: false,
     pickupCollapsed: false,
+    completedDeliveryCollapsed: false,
     deliveryAppendedHint: '',
     exportingLabelPdf: false,
   },
@@ -117,6 +146,7 @@ createPage({
           saleLabel: '加载失败',
           sale: null,
           deliveryOrders: [],
+          completedDeliveryOrders: [],
           pickupOrders: [],
           canEdit: false,
           deliveryAppendedHint: '',
@@ -171,6 +201,7 @@ createPage({
         sale: null,
         canEdit: false,
         deliveryOrders: [],
+        completedDeliveryOrders: [],
         pickupOrders: [],
         deliveryAppendedHint: '',
       })
@@ -183,7 +214,14 @@ createPage({
     this.setData({ loadingPrep: false })
     finishLoadPhase()
     if (!res.ok) {
-      this.setData({ sale: null, canEdit: false, deliveryOrders: [], pickupOrders: [], deliveryAppendedHint: '' })
+      this.setData({
+        sale: null,
+        canEdit: false,
+        deliveryOrders: [],
+        completedDeliveryOrders: [],
+        pickupOrders: [],
+        deliveryAppendedHint: '',
+      })
       wx.showToast({ title: res.message || '加载失败', icon: 'none' })
       return
     }
@@ -195,10 +233,13 @@ createPage({
       (res.data && res.data.pickup && Array.isArray(res.data.pickup.orders) && res.data.pickup.orders) || []
     const appendedOrderIds =
       (res.data && res.data.delivery && Array.isArray(res.data.delivery.appendedOrderIds) && res.data.delivery.appendedOrderIds) || []
+    const allDeliveryOrders = rawDeliveryOrders.map(decoratePrepOrder)
+    const splitDelivery = splitDeliveryOrders(allDeliveryOrders)
     this.setData({
       sale: sale ? { ...sale, statusText: saleStatusText(sale.status) } : null,
       canEdit,
-      deliveryOrders: rawDeliveryOrders.map(decoratePrepOrder),
+      deliveryOrders: splitDelivery.pending,
+      completedDeliveryOrders: splitDelivery.completed,
       pickupOrders: rawPickupOrders.map(decoratePrepOrder),
       deliveryAppendedHint: appendedOrderIds.length ? `有 ${appendedOrderIds.length} 个新配送单已自动追加到末尾` : '',
     })
@@ -210,6 +251,10 @@ createPage({
 
   togglePickupCollapsed() {
     this.setData({ pickupCollapsed: !this.data.pickupCollapsed })
+  },
+
+  toggleCompletedDeliveryCollapsed() {
+    this.setData({ completedDeliveryCollapsed: !this.data.completedDeliveryCollapsed })
   },
 
   async onExportLabelsPdf() {
@@ -251,9 +296,9 @@ createPage({
     if (!this.data.canEdit || this.data.saving || this.data.markingPrepDone) return false
     const saleId = String((this.data.sale && this.data.sale._id) || '').trim()
     if (!saleId) return false
-    const orderIds = (Array.isArray(nextDeliveryOrders) ? nextDeliveryOrders : [])
-      .map((o) => String((o && o._id) || '').trim())
-      .filter(Boolean)
+    const pendingIds = uniqueOrderIds(nextDeliveryOrders)
+    const completedIds = uniqueOrderIds(this.data.completedDeliveryOrders)
+    const orderIds = pendingIds.concat(completedIds)
     this.setData({ saving: true })
     const res = await call('admin', 'saveSaleFulfillmentOrder', { saleId, orderIds })
     this.setData({ saving: false })

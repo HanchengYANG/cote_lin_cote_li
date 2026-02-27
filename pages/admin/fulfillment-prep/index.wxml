@@ -35,14 +35,13 @@
           >
             导出标签
           </button>
-          <view class="muted small">包含配送+自取；每单一格（A6），一页4单（A4）。</view>
         </view>
 
         <view class="card" wx:if="{{loadingPrep}}">
           <view class="muted">加载订单中...</view>
         </view>
 
-        <view class="card" wx:elif="{{deliveryOrders.length===0 && pickupOrders.length===0}}">
+        <view class="card" wx:elif="{{deliveryOrders.length===0 && pickupOrders.length===0 && completedDeliveryOrders.length===0}}">
           <view class="title">订单清单</view>
           <view class="muted">暂无有效订单</view>
         </view>
@@ -52,7 +51,7 @@
             <view class="section-head" bindtap="toggleDeliveryCollapsed">
               <view>
                 <view class="title no-margin">配送单（{{deliveryOrders.length}}）</view>
-                <view class="muted small section-note">仅配送单参与排序</view>
+                <view class="muted small section-note">仅待配送单参与排序</view>
               </view>
               <view class="fold-btn">{{deliveryCollapsed ? '展开' : '收起'}}</view>
             </view>
@@ -99,6 +98,36 @@
                     </view>
                     <view class="meta-line">
                       <text class="tag pickup">自取</text>
+                      <text class="address">{{item.addressDisplay}}</text>
+                    </view>
+                    <view class="meta-line">
+                      <text class="address">电话：{{item.phoneText}}</text>
+                    </view>
+                  </view>
+                </view>
+              </block>
+            </block>
+          </view>
+
+          <view class="card">
+            <view class="section-head" bindtap="toggleCompletedDeliveryCollapsed">
+              <view>
+                <view class="title no-margin">已配送完成（{{completedDeliveryOrders.length}}）</view>
+                <view class="muted small section-note">仅展示，不参与配送排序</view>
+              </view>
+              <view class="fold-btn">{{completedDeliveryCollapsed ? '展开' : '收起'}}</view>
+            </view>
+            <block wx:if="{{!completedDeliveryCollapsed}}">
+              <view class="sale-stats-empty muted small" wx:if="{{completedDeliveryOrders.length===0}}">暂无已配送完成订单</view>
+              <block wx:else>
+                <view class="order-row" wx:for="{{completedDeliveryOrders}}" wx:key="_id">
+                  <view class="order-main">
+                    <view class="order-top">
+                      <text class="name">{{item.customerNameText}}</text>
+                      <text class="amount">€{{item.amountEuro}}</text>
+                    </view>
+                    <view class="meta-line">
+                      <text class="tag delivery-done">已配送完成</text>
                       <text class="address">{{item.addressDisplay}}</text>
                     </view>
                     <view class="meta-line">

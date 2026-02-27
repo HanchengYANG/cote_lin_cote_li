@@ -79,6 +79,20 @@ function decorateRunOrder(order) {
   }
 }
 
+function splitOrdersByDelivered(orders) {
+  const arr = Array.isArray(orders) ? orders : []
+  const pending = []
+  const delivered = []
+  for (const item of arr) {
+    if (item && item.isDelivered) {
+      delivered.push(item)
+      continue
+    }
+    pending.push(item)
+  }
+  return { pending, delivered }
+}
+
 function readDatasetString(e, key) {
   const dataset = (e && e.currentTarget && e.currentTarget.dataset) || {}
   return String(dataset[key] || '').trim()
@@ -211,9 +225,20 @@ function createRunPage(config) {
     getRunAction: '',
     enableQuickCall: true,
     enableGoogleNav: false,
+    splitByDelivered: false,
     emptySelectorLabel: '暂无可执行开单',
     preferredStatuses: [],
     appendedHintFormatter: null,
+    progressTitle: '执行进度',
+    activeOrderCountLabel: '有效订单',
+    noSaleText: '',
+    listActionHint: '点任一订单弹出操作菜单',
+    pendingTitle: '未交付',
+    deliveredTitle: '已交付',
+    pendingNote: '',
+    deliveredNote: '',
+    emptyPendingText: '暂无未交付订单',
+    emptyDeliveredText: '暂无已交付订单',
     ...config,
   }
 
@@ -238,7 +263,21 @@ function createRunPage(config) {
         remainingOrders: 0,
       },
       orders: [],
+      pendingOrders: [],
+      deliveredOrders: [],
+      pendingCollapsed: false,
+      deliveredCollapsed: false,
       appendedHint: '',
+      progressTitle: String(cfg.progressTitle || '').trim() || '执行进度',
+      activeOrderCountLabel: String(cfg.activeOrderCountLabel || '').trim() || '有效订单',
+      noSaleText: String(cfg.noSaleText || cfg.emptySelectorLabel || '').trim() || '暂无可执行开单',
+      listActionHint: String(cfg.listActionHint || '').trim() || '点任一订单弹出操作菜单',
+      pendingTitle: String(cfg.pendingTitle || '').trim() || '未交付',
+      deliveredTitle: String(cfg.deliveredTitle || '').trim() || '已交付',
+      pendingNote: String(cfg.pendingNote || '').trim(),
+      deliveredNote: String(cfg.deliveredNote || '').trim(),
+      emptyPendingText: String(cfg.emptyPendingText || '').trim() || '暂无未交付订单',
+      emptyDeliveredText: String(cfg.emptyDeliveredText || '').trim() || '暂无已交付订单',
     },
 
     onLoad(query) {
@@ -269,6 +308,8 @@ function createRunPage(config) {
             sale: null,
             canOperate: false,
             orders: [],
+            pendingOrders: [],
+            deliveredOrders: [],
             appendedHint: '',
           })
           wx.showToast({ title: salesRes.message || '加载失败', icon: 'none' })
@@ -320,6 +361,8 @@ function createRunPage(config) {
           sale: null,
           canOperate: false,
           orders: [],
+          pendingOrders: [],
+          deliveredOrders: [],
           appendedHint: '',
           summary: { totalActiveOrders: 0, deliveredOrders: 0, paidOrders: 0, doneOrders: 0, remainingOrders: 0 },
         })
@@ -336,6 +379,8 @@ function createRunPage(config) {
           sale: null,
           canOperate: false,
           orders: [],
+          pendingOrders: [],
+          deliveredOrders: [],
           appendedHint: '',
           summary: { totalActiveOrders: 0, deliveredOrders: 0, paidOrders: 0, doneOrders: 0, remainingOrders: 0 },
         })
@@ -343,6 +388,10 @@ function createRunPage(config) {
         return
       }
       const rawOrders = Array.isArray(res.data && res.data.orders) ? res.data.orders : []
+      const decoratedOrders = rawOrders.map(decorateRunOrder)
+      const split = cfg.splitByDelivered
+        ? splitOrdersByDelivered(decoratedOrders)
+        : { pending: decoratedOrders, delivered: [] }
       const appendedOrderIds =
         (res.data && res.data.derived && Array.isArray(res.data.derived.appendedOrderIds) && res.data.derived.appendedOrderIds) || []
       this.setData({
@@ -351,12 +400,22 @@ function createRunPage(config) {
         summary:
           (res.data && res.data.summary) ||
           { totalActiveOrders: 0, deliveredOrders: 0, paidOrders: 0, doneOrders: 0, remainingOrders: 0 },
-        orders: rawOrders.map(decorateRunOrder),
+        orders: decoratedOrders,
+        pendingOrders: split.pending,
+        deliveredOrders: split.delivered,
         appendedHint:
           typeof cfg.appendedHintFormatter === 'function' && appendedOrderIds.length
             ? cfg.appendedHintFormatter(appendedOrderIds.length)
             : '',
       })
+    },
+
+    togglePendingCollapsed() {
+      this.setData({ pendingCollapsed: !this.data.pendingCollapsed })
+    },
+
+    toggleDeliveredCollapsed() {
+      this.setData({ deliveredCollapsed: !this.data.deliveredCollapsed })
     },
 
     openOrderDetailById(orderId) {
