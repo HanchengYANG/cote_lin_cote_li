@@ -119,12 +119,11 @@ function splitOrderItemsForLabels(items, capacities = {}) {
   return out
 }
 
-function buildAddressText(order, formatOrderAddress) {
+function buildAddressText(order) {
   const fulfillmentType = normalizeFulfillmentType(order && order.fulfillmentType)
   if (fulfillmentType !== 'delivery') return ''
   const rawAddressText = String((order && order.addressText) || '').trim()
-  if (rawAddressText) return stripTrailingCountryLabel(rawAddressText)
-  return stripTrailingCountryLabel(String(formatOrderAddress(order && order.address) || '').trim())
+  return rawAddressText ? stripTrailingCountryLabel(rawAddressText) : ''
 }
 
 function buildCustomerNickname(order) {
@@ -153,8 +152,13 @@ function formatFrenchPhoneLabel(inputDigits) {
   return digits.replace(/(\d{2})(?=\d)/g, '$1 ').trim()
 }
 
+function formatAddressText(row) {
+  if (!row) return ''
+  return [row.line1, row.line2, row.postalCode, row.city, row.country].filter(Boolean).join(' ')
+}
+
 function toLabelDto(order, seqMeta, deps) {
-  const { normalizePhone, formatOrderAddress } = deps
+  const { normalizePhone } = deps
   const items = normalizeLabelItems(order && order.items)
   const totalsRaw = (order && order.totals) || {}
   const computedTotals = computeTotalsFromItems(items)
@@ -175,7 +179,7 @@ function toLabelDto(order, seqMeta, deps) {
     customerNickname: buildCustomerNickname(order),
     phone: formatFrenchPhoneLabel(normalizePhone(order && order.contact && order.contact.phone)),
     deliveryTimeSlotLabel: String((order && order.deliveryTimeSlotLabelSnapshot) || '').trim(),
-    addressText: buildAddressText(order, formatOrderAddress),
+    addressText: buildAddressText(order),
     remark: String((order && order.remark) || '').trim(),
     items: items.map((it) => ({
       dishName: it.dishName,
@@ -242,7 +246,6 @@ function createOrderLabelExportDataService(deps) {
     buildFulfillmentOrderedOrders,
     toEpochMs,
     normalizePhone,
-    formatOrderAddress,
   } = deps
 
   async function loadSaleOrThrow(saleId) {
@@ -283,7 +286,22 @@ function createOrderLabelExportDataService(deps) {
         customerNickname = ''
       }
     }
-    return { ...order, customerNickname }
+    let addressText = String((order && order.addressText) || '').trim()
+    if (normalizeFulfillmentType(order && order.fulfillmentType) === 'delivery' && !addressText) {
+      const addressId = String((order && order.addressId) || '').trim()
+      if (openId && addressId) {
+        try {
+          const addrRes = await db.collection('customer_addresses').doc(addressId).get()
+          const addr = (addrRes && addrRes.data) || null
+          if (addr && String((addr && addr.customerOpenId) || '').trim() === openId) {
+            addressText = stripTrailingCountryLabel(formatAddressText(addr))
+          }
+        } catch (err) {
+          addressText = ''
+        }
+      }
+    }
+    return { ...order, customerNickname, addressText }
   }
 
   async function loadLabelOrdersBySale(input) {
@@ -323,7 +341,7 @@ function createOrderLabelExportDataService(deps) {
     const arr = Array.isArray(orders) ? orders : []
     const out = []
     for (let i = 0; i < arr.length; i += 1) {
-      const fragments = expandOrderToLabelFragments(arr[i], { normalizePhone, formatOrderAddress })
+      const fragments = expandOrderToLabelFragments(arr[i], { normalizePhone })
       for (let j = 0; j < fragments.length; j += 1) out.push(fragments[j])
     }
     return out
@@ -333,7 +351,7 @@ function createOrderLabelExportDataService(deps) {
     loadLabelOrdersBySale,
     loadLabelOrderById,
     toLabelDto(order, seqMeta) {
-      return toLabelDto(order, seqMeta, { normalizePhone, formatOrderAddress })
+      return toLabelDto(order, seqMeta, { normalizePhone })
     },
     toLabelDtos,
   }

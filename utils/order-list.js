@@ -2,11 +2,6 @@ const { formatTime, centToEuro } = require('./format')
 const { getOrderMainStatus } = require('./order-status')
 const { formatPhoneDisplay } = require('./phone')
 
-function formatAddress(a) {
-  if (!a) return ''
-  return [a.line1, a.line2, a.postalCode, a.city, a.country].filter(Boolean).join(', ')
-}
-
 function decorateOrderSummary(order) {
   if (!order) return null
   const mainStatus = getOrderMainStatus(order)
@@ -14,7 +9,7 @@ function decorateOrderSummary(order) {
   const totals = order.totals || { amountCents: 0, qty: 0 }
   const customerNameText = String(order.customerNickname || '').trim() || '匿名用户'
   const phoneText = formatPhoneDisplay(order.contact && order.contact.phone) || '-'
-  const addressText = formatAddress(order.address)
+  const addressText = String((order && order.addressText) || '').trim()
   return {
     ...order,
     statusText: mainStatus.text,

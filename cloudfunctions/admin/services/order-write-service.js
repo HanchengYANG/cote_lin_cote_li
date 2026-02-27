@@ -19,8 +19,43 @@ function createOrderWriteService(deps) {
     normalizeAddressPayload,
     normalizeStoredAddresses,
     isPhoneValid,
-    extractOrderAddressSnapshot,
+    buildAddressId,
   } = deps
+
+  function buildLegacyAddressRemovePatch(order) {
+    return order && Object.prototype.hasOwnProperty.call(order, 'address') ? { address: _.remove } : {}
+  }
+
+  async function createCustomerAddress(customerOpenId, addressInput, phoneInput) {
+    const openId = String(customerOpenId || '').trim()
+    if (!openId) throwBiz('BAD_REQUEST', '配送订单缺少客户信息')
+    const address = addressInput || null
+    if (!address) throwBiz('INVALID_ADDRESS', '手动地址格式不正确')
+    const phone = normalizePhone(phoneInput || '')
+    if (!isPhoneValid(phone)) throwBiz('INVALID_PHONE', '请填写有效电话')
+
+    const now = db.serverDate()
+    const nowMs = Date.now()
+    const addressId = buildAddressId()
+    await db.collection('customer_addresses').doc(addressId).set({
+      data: {
+        customerOpenId: openId,
+        id: addressId,
+        label: String(address.label || '').trim(),
+        line1: String(address.line1 || '').trim(),
+        line2: String(address.line2 || '').trim(),
+        postalCode: String(address.postalCode || '').trim(),
+        city: String(address.city || '').trim(),
+        phone,
+        country: 'FR',
+        createdAtMs: nowMs,
+        updatedAtMs: nowMs,
+        createdAt: now,
+        updatedAt: now,
+      },
+    })
+    return addressId
+  }
 
   return {
     async listPendingOrders(event) {
@@ -119,6 +154,7 @@ function createOrderWriteService(deps) {
               customerLockedAt: now,
               customerLockedReason: 'ADMIN_APPROVED_PENDING',
               saleConfigVersionSnapshot: toSafeInt(sale.saleConfigVersion, 0),
+              ...buildLegacyAddressRemovePatch(order),
               updatedAt: now,
             },
           })
@@ -165,6 +201,7 @@ function createOrderWriteService(deps) {
               pendingReason: _.remove,
               pendingDetail: _.remove,
               pendingAt: _.remove,
+              ...buildLegacyAddressRemovePatch(order),
               updatedAt: now,
             },
           })
@@ -206,6 +243,7 @@ function createOrderWriteService(deps) {
         await db.collection('orders').doc(orderId).update({
           data: {
             deliveryTimeSlotLabelSnapshot: slotLabel,
+            ...buildLegacyAddressRemovePatch(order),
             updatedAt: now,
           },
         })
@@ -228,13 +266,13 @@ function createOrderWriteService(deps) {
       const orderId = String(event.orderId || '').trim()
       const fulfillmentType = String(event.fulfillmentType || '').trim()
       const requestedAddressId = String(event.addressId || '').trim()
-      const hasManualAddressInput = !!(event && event.address)
+      const hasManualAddressInput = Object.prototype.hasOwnProperty.call(event || {}, 'address')
+      const requestedManualAddress = event && event.address ? normalizeAddressPayload(event.address) : null
+      const requestedManualAddressPhone = normalizePhone(event && event.address && event.address.phone)
       const hasPhoneInput = Object.prototype.hasOwnProperty.call(event || {}, 'phone')
       const requestedPhone = hasPhoneInput ? normalizePhone(event.phone) : ''
-      const requestedManualAddress = event && event.address ? normalizeAddressPayload(event.address) : null
       if (!orderId) return fail('BAD_REQUEST', 'Missing orderId')
       if (fulfillmentType !== 'delivery' && fulfillmentType !== 'pickup') return fail('BAD_REQUEST', 'Invalid fulfillmentType')
-      if (hasManualAddressInput && !requestedManualAddress) return fail('INVALID_ADDRESS', '手动地址格式不正确')
       let slotLabel = String(event.deliveryTimeSlotLabel || '').trim()
       if (!slotLabel && fulfillmentType === 'delivery') {
         const slot = parseAndValidateDeliverySlot(event)
@@ -251,8 +289,12 @@ function createOrderWriteService(deps) {
         let customerAddresses = []
         if (order.customerOpenId) {
           try {
-            const r2 = await db.collection('customer_addresses').where({ customerOpenId: order.customerOpenId }).get()
-            customerAddresses = normalizeStoredAddresses((r2 && r2.data) || [])
+            const rows = await getAllByPaging(
+              (skip, limit) =>
+                db.collection('customer_addresses').where({ customerOpenId: order.customerOpenId }).skip(skip).limit(limit),
+              { pageSize: 100 }
+            )
+            customerAddresses = normalizeStoredAddresses(rows)
           } catch (err) {
             customerAddresses = []
           }
@@ -269,47 +311,25 @@ function createOrderWriteService(deps) {
         let addressSource = 'unchanged'
 
         if (fulfillmentType === 'delivery') {
-          let nextAddress = null
-          let nextAddressId = null
-
+          if (!String(order.customerOpenId || '').trim()) return fail('BAD_REQUEST', '配送订单缺少客户信息，无法设置地址')
+          let nextAddressId = ''
           const selectedSaved = requestedAddressId ? customerAddresses.find((x) => x.id === requestedAddressId) || null : null
           if (requestedAddressId && !selectedSaved) return fail('BAD_REQUEST', '所选客户地址不存在')
           if (selectedSaved) {
-            nextAddress = {
-              label: selectedSaved.label,
-              line1: selectedSaved.line1,
-              line2: selectedSaved.line2,
-              postalCode: selectedSaved.postalCode,
-              city: selectedSaved.city,
-              country: 'FR',
-            }
             nextAddressId = selectedSaved.id
             addressSource = 'addressId'
             if (!nextContact.phone && isPhoneValid(selectedSaved.phone)) nextContact.phone = selectedSaved.phone
-          } else if (requestedManualAddress) {
-            nextAddress = {
-              label: requestedManualAddress.label,
-              line1: requestedManualAddress.line1,
-              line2: requestedManualAddress.line2,
-              postalCode: requestedManualAddress.postalCode,
-              city: requestedManualAddress.city,
-              country: 'FR',
-            }
-            nextAddressId = null
+          } else if (hasManualAddressInput) {
+            if (!requestedManualAddress) return fail('INVALID_ADDRESS', '手动地址格式不正确')
+            if (!nextContact.phone && isPhoneValid(requestedManualAddressPhone)) nextContact.phone = requestedManualAddressPhone
+            if (!isPhoneValid(nextContact.phone)) return fail('INVALID_PHONE', '请填写有效电话')
+            nextAddressId = await createCustomerAddress(order.customerOpenId, requestedManualAddress, nextContact.phone)
             addressSource = 'manual'
-          } else {
-            const existingAddress = extractOrderAddressSnapshot(order.address)
-            if (existingAddress) {
-              nextAddress = existingAddress
-              const oldAddressId = String(order.addressId || '').trim()
-              nextAddressId = oldAddressId || null
-            }
           }
-          if (!nextAddress) return fail('BAD_REQUEST', '配送订单缺少有效地址')
+          if (!nextAddressId) return fail('BAD_REQUEST', '缺少 addressId')
           if (!isPhoneValid(nextContact.phone)) return fail('INVALID_PHONE', '请填写有效电话')
           // Use _.set to replace the whole object; direct nested merge fails when contact/address is null.
           nextData.contact = _.set(nextContact)
-          nextData.address = _.set(nextAddress)
           nextData.addressId = nextAddressId
 
           if (!slotLabel) slotLabel = String(order.deliveryTimeSlotLabelSnapshot || '').trim()
@@ -329,10 +349,12 @@ function createOrderWriteService(deps) {
           if (hasPhoneInput && requestedPhone && !isPhoneValid(requestedPhone)) return fail('INVALID_PHONE', '请填写有效电话')
           // Use _.set to replace the whole object; direct nested merge fails when contact/address is null.
           nextData.contact = _.set(nextContact)
-          nextData.address = null
           nextData.addressId = null
           nextData.deliveryTimeSlotLabelSnapshot = null
           nextData.acceptDeliverySlot = false
+        }
+        if (Object.prototype.hasOwnProperty.call(order || {}, 'address')) {
+          nextData.address = _.remove
         }
 
         await db.collection('orders').doc(orderId).update({ data: nextData })
@@ -351,6 +373,7 @@ function createOrderWriteService(deps) {
           },
         })
       } catch (err) {
+        if (err && err.code) return fail(err.code, err.message || 'Update fulfillment failed', err.detail)
         return fail('TX_FAILED', 'Update fulfillment failed', String(err && err.message))
       }
       return ok({})
@@ -383,6 +406,7 @@ function createOrderWriteService(deps) {
           await tx.collection('orders').doc(orderId).update({
             data: {
               remark,
+              ...buildLegacyAddressRemovePatch(order),
               updatedAt: now,
             },
           })
@@ -495,8 +519,9 @@ function createOrderWriteService(deps) {
 
           const expandedLimits = []
           let saleVersionSnapshot = toSafeInt(order.saleConfigVersionSnapshot, 0)
+          let sale = null
           if (order.status === ORDER_STATUS.ACTIVE && order.saleId) {
-            const sale = await getSaleTx(tx, order.saleId)
+            sale = await getSaleTx(tx, order.saleId)
             if (sale) {
               const cfgMap = dishConfigMap(sale.dishConfigs)
               const appendedDishIds = []
@@ -571,6 +596,7 @@ function createOrderWriteService(deps) {
               items: nextItems,
               totals: { qty: totalQty, amountCents: totalAmountCents },
               saleConfigVersionSnapshot: saleVersionSnapshot,
+              ...buildLegacyAddressRemovePatch(order),
               updatedAt: now,
             },
           })
@@ -610,7 +636,13 @@ function createOrderWriteService(deps) {
 
           const now = db.serverDate()
           await tx.collection('orders').doc(orderId).update({
-            data: { status: ORDER_STATUS.CANCELLED, cancelledAt: now, cancelledByOpenId: openId, updatedAt: now },
+            data: {
+              status: ORDER_STATUS.CANCELLED,
+              cancelledAt: now,
+              cancelledByOpenId: openId,
+              ...buildLegacyAddressRemovePatch(order),
+              updatedAt: now,
+            },
           })
 
           if (order.status === ORDER_STATUS.ACTIVE && order.saleId) {

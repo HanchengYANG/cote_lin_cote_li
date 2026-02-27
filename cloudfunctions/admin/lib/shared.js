@@ -23,6 +23,10 @@ function buildOrderId(saleId, openId) {
   return crypto.createHash('md5').update(`${String(saleId || '')}:${String(openId || '')}`).digest('hex')
 }
 
+function buildAddressId() {
+  return `addr_${Date.now().toString(36)}_${crypto.randomBytes(3).toString('hex')}`
+}
+
 function parseAndValidateDeliverySlot(event) {
   const deliverySlotDate = event.deliverySlotDate ? String(event.deliverySlotDate).trim() : ''
   const deliverySlotStartTime = event.deliverySlotStartTime ? String(event.deliverySlotStartTime).trim() : ''
@@ -153,6 +157,7 @@ module.exports = {
   toSafeInt,
   normalizeDeliveryMinByCity,
   buildOrderId,
+  buildAddressId,
   parseAndValidateDeliverySlot,
   normalizePhone,
   isPhoneValid,

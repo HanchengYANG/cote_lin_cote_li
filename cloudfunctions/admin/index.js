@@ -3,12 +3,12 @@ const {
   toSafeInt,
   normalizeDeliveryMinByCity,
   buildOrderId,
+  buildAddressId,
   parseAndValidateDeliverySlot,
   normalizePhone,
   isPhoneValid,
   normalizeAddressPayload,
   normalizeStoredAddresses,
-  extractOrderAddressSnapshot,
   formatOrderAddress,
   normalizeDishConfigs,
   dishConfigMap,
@@ -247,9 +247,19 @@ function normalizeSaleStatusForForceSet(input) {
   return ''
 }
 
+function resolveOrderAddressText(order, addressesByOpenId) {
+  if (!order || String((order && order.fulfillmentType) || '').trim() !== 'delivery') return ''
+  const addressId = String((order && order.addressId) || '').trim()
+  if (!addressId) return ''
+  const customerOpenId = String((order && order.customerOpenId) || '').trim()
+  const customerAddresses = (addressesByOpenId && addressesByOpenId.get(customerOpenId)) || []
+  const picked = customerAddresses.find((x) => String((x && x.id) || '').trim() === addressId) || null
+  return picked ? formatOrderAddress(picked) : ''
+}
+
 function formatFulfillmentAddressText(order) {
   if (!order || String(order.fulfillmentType || '') !== 'delivery') return ''
-  return formatOrderAddress(order.address)
+  return String((order && order.addressText) || '').trim()
 }
 
 async function getSaleFulfillmentPlan(saleId) {
@@ -306,6 +316,8 @@ async function getActiveOrdersBySaleWithNicknames(saleId) {
     )
   )
   const customers = await getCustomersByOpenIds(customerOpenIds)
+  const customerAddressRows = await getCustomerAddressesByOpenIds(customerOpenIds)
+  const addressesByOpenId = buildAddressMapByOpenId(customerAddressRows)
   const nicknameByOpenId = new Map()
   for (const c of customers) {
     const id = String((c && c._id) || '').trim()
@@ -314,6 +326,7 @@ async function getActiveOrdersBySaleWithNicknames(saleId) {
   }
   return orders.map((o) => ({
     ...o,
+    addressText: resolveOrderAddressText(o, addressesByOpenId),
     customerNickname: nicknameByOpenId.get(String((o && o.customerOpenId) || '').trim()) || '',
   }))
 }
@@ -776,7 +789,7 @@ exports.main = async (event) => {
     normalizeAddressPayload,
     normalizeStoredAddresses,
     isPhoneValid,
-    extractOrderAddressSnapshot,
+    buildAddressId,
   })
   if (orderWriteHandlers[action]) {
     return orderWriteHandlers[action](event, { openId })
@@ -787,6 +800,7 @@ exports.main = async (event) => {
     _,
     ok,
     fail,
+    getAllByPaging,
     ORDER_STATUS,
     HANDOFF_STATUS,
     throwBiz,
@@ -799,7 +813,7 @@ exports.main = async (event) => {
     normalizeAddressPayload,
     normalizeStoredAddresses,
     isPhoneValid,
-    extractOrderAddressSnapshot,
+    buildAddressId,
   })
   if (manualOrderWriteHandlers[action]) {
     return manualOrderWriteHandlers[action](event, { openId })

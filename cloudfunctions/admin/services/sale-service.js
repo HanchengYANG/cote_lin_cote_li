@@ -357,6 +357,7 @@ function createSaleService(deps) {
             delete nextData.rejectedReason
             delete nextData.cancelledAt
             delete nextData.cancelledByOpenId
+            delete nextData.address
 
             if (targetOrderId === order._id) {
               await tx.collection('orders').doc(order._id).update({
@@ -382,6 +383,7 @@ function createSaleService(deps) {
                   rejectedReason: _.remove,
                   cancelledAt: _.remove,
                   cancelledByOpenId: _.remove,
+                  ...(Object.prototype.hasOwnProperty.call(order || {}, 'address') ? { address: _.remove } : {}),
                 },
               })
             } else {

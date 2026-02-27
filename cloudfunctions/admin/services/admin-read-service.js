@@ -18,6 +18,16 @@ function createAdminReadService(deps) {
     normalizeStoredAddresses,
   } = deps
 
+  function resolveOrderAddressText(order, addressesByOpenId) {
+    if (!order || String((order && order.fulfillmentType) || '').trim() !== 'delivery') return ''
+    const addressId = String((order && order.addressId) || '').trim()
+    if (!addressId) return ''
+    const customerOpenId = String((order && order.customerOpenId) || '').trim()
+    const customerAddresses = (addressesByOpenId && addressesByOpenId.get(customerOpenId)) || []
+    const picked = customerAddresses.find((x) => String((x && x.id) || '').trim() === addressId) || null
+    return picked ? formatOrderAddress(picked) : ''
+  }
+
   return {
     async listOrders(event) {
       const saleId = event.saleId
@@ -46,6 +56,8 @@ function createAdminReadService(deps) {
       )
       const nicknameByOpenId = {}
       const customers = await getCustomersByOpenIds(openIds)
+      const addressRows = await getCustomerAddressesByOpenIds(openIds)
+      const addressesByOpenId = buildAddressMapByOpenId(addressRows)
       for (const c of customers) {
         const id = String((c && c._id) || '').trim()
         if (!id) continue
@@ -53,9 +65,11 @@ function createAdminReadService(deps) {
       }
       const withCustomer = orders.map((o) => {
         const id = String((o && o.customerOpenId) || '').trim()
+        const { address, ...rest } = o || {}
         return {
-          ...o,
+          ...rest,
           customerNickname: nicknameByOpenId[id] || '',
+          addressText: resolveOrderAddressText(o, addressesByOpenId),
         }
       })
       return ok({ orders: withCustomer })

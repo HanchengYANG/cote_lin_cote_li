@@ -50,6 +50,10 @@ function createFulfillmentWriteService(deps) {
     }
   }
 
+  function buildLegacyAddressRemovePatch(order) {
+    return order && Object.prototype.hasOwnProperty.call(order, 'address') ? { address: _.remove } : {}
+  }
+
   return {
     async updateSaleProductionProgress(event, ctx) {
       const openId = ctx && ctx.openId
@@ -281,6 +285,7 @@ function createFulfillmentWriteService(deps) {
                 ...currentPayment,
                 method: paymentMethod,
               },
+              ...buildLegacyAddressRemovePatch(order),
               updatedAt: now,
             },
           })
@@ -383,6 +388,7 @@ function createFulfillmentWriteService(deps) {
               paidStatus: nextPaid,
             },
             handoffStatus: nextHandoff,
+            ...buildLegacyAddressRemovePatch(order),
             updatedAt: now,
           }
           if (currentHandoff !== HANDOFF_STATUS.DELIVERED && nextHandoff === HANDOFF_STATUS.DELIVERED) {

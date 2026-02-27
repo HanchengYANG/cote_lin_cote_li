@@ -28,6 +28,10 @@ function createCustomerOrderService(deps) {
     normalizePaymentMethod,
   } = deps
 
+  function buildLegacyAddressRemovePatch(order) {
+    return order && Object.prototype.hasOwnProperty.call(order, 'address') ? { address: _.remove } : {}
+  }
+
   return {
     async updateMyOrderItems(event, ctx) {
       const openId = ctx && ctx.openId
@@ -147,6 +151,7 @@ function createCustomerOrderService(deps) {
               totals: { qty: totalQty, amountCents: totalAmountCents },
               saleConfigVersionSnapshot:
                 order.status === ORDER_STATUS.ACTIVE ? toSafeInt(sale.saleConfigVersion, 0) : toSafeInt(order.saleConfigVersionSnapshot, 0),
+              ...buildLegacyAddressRemovePatch(order),
               updatedAt: now,
             },
           })
@@ -222,6 +227,7 @@ function createCustomerOrderService(deps) {
               status: ORDER_STATUS.CANCELLED,
               cancelledAt: now,
               cancelledByOpenId: openId,
+              ...buildLegacyAddressRemovePatch(order),
               updatedAt: now,
             },
           })
@@ -256,6 +262,9 @@ function createCustomerOrderService(deps) {
       const requestedAddressId = String(event.addressId || '').trim()
       const requestedAcceptDeliverySlot = !!event.acceptDeliverySlot
       const requestedPhone = normalizePhone(event.phone)
+      if (requestedFulfillmentType === 'delivery' && !requestedAddressId) {
+        return fail('BAD_REQUEST', '缺少 addressId')
+      }
 
       const items = Array.isArray(event.items) ? event.items : []
       if (items.length === 0) return fail('BAD_REQUEST', 'Empty items')
@@ -326,11 +335,12 @@ function createCustomerOrderService(deps) {
             }
             if (existingFulfillmentType) fulfillmentType = existingFulfillmentType
             if (fulfillmentType === 'delivery') {
+              if (!requestedAddressId) throwBiz('BAD_REQUEST', '缺少 addressId')
               const existingAddressId = String(existing.addressId || '').trim()
-              if (existingAddressId && requestedAddressId && requestedAddressId !== existingAddressId) {
+              if (existingAddressId && requestedAddressId !== existingAddressId) {
                 throwBiz('ADDRESS_LOCKED', '已有订单不可修改地址')
               }
-              if (existingAddressId) addressId = existingAddressId
+              addressId = requestedAddressId
             } else {
               addressId = ''
             }
@@ -534,6 +544,7 @@ function createCustomerOrderService(deps) {
 
           const paidStatus = String((existing && existing.payment && existing.payment.paidStatus) || '') === 'PAID' ? 'PAID' : 'UNPAID'
           const now = db.serverDate()
+          if (fulfillmentType === 'delivery' && !orderAddressId) throwBiz('BAD_REQUEST', '请选择地址')
           const doc = {
             saleId: saleDoc._id,
             customerOpenId: openId,
@@ -542,18 +553,7 @@ function createCustomerOrderService(deps) {
             deliveryTimeSlotLabelSnapshot: fulfillmentType === 'delivery' ? String(saleDoc.deliveryTimeSlotLabel || '').trim() : null,
             acceptDeliverySlot,
             contact: { phone: orderPhone },
-            addressId: fulfillmentType === 'delivery' ? orderAddressId || null : null,
-            address:
-              fulfillmentType === 'delivery'
-                ? {
-                    label: String((addressSnapshot && addressSnapshot.label) || '').trim(),
-                    line1: String((addressSnapshot && addressSnapshot.line1) || '').trim(),
-                    line2: String((addressSnapshot && addressSnapshot.line2) || '').trim(),
-                    postalCode: String((addressSnapshot && addressSnapshot.postalCode) || '').trim(),
-                    city: String((addressSnapshot && addressSnapshot.city) || '').trim(),
-                    country: 'FR',
-                  }
-                : null,
+            addressId: fulfillmentType === 'delivery' ? orderAddressId : null,
             minOrderCentsSnapshot: fulfillmentType === 'delivery' ? minOrderCentsForCity || null : null,
             payment: { method: paymentMethod, paidStatus },
             handoffStatus: 'PENDING',
@@ -578,6 +578,7 @@ function createCustomerOrderService(deps) {
           if (existing) {
             const updateData = {
               ...doc,
+              ...buildLegacyAddressRemovePatch(existing),
               cancelledAt: _.remove,
               cancelledByOpenId: _.remove,
               rejectedAt: _.remove,
@@ -660,4 +661,3 @@ function createCustomerOrderService(deps) {
 module.exports = {
   createCustomerOrderService,
 }
-

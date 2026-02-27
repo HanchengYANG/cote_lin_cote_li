@@ -45,10 +45,6 @@ function buildManualCustomerId() {
   return `manual_guest:${Date.now()}:${crypto.randomBytes(3).toString('hex')}`
 }
 
-function buildManualAddressId() {
-  return `addr_${Date.now().toString(36)}_${crypto.randomBytes(3).toString('hex')}`
-}
-
 function normalizeManualDeliveryAddressInput(input, normalizeAddressPayload, normalizePhone) {
   const base = normalizeAddressPayload(input)
   if (!base) return null
@@ -58,24 +54,13 @@ function normalizeManualDeliveryAddressInput(input, normalizeAddressPayload, nor
   }
 }
 
-function buildOrderAddressSnapshotFromAny(input) {
-  if (!input) return null
-  return {
-    label: String(input.label || '').trim(),
-    line1: String(input.line1 || '').trim(),
-    line2: String(input.line2 || '').trim(),
-    postalCode: String(input.postalCode || '').trim(),
-    city: String(input.city || '').trim(),
-    country: 'FR',
-  }
-}
-
 function createManualOrderWriteService(deps) {
   const {
     db,
     _,
     ok,
     fail,
+    getAllByPaging,
     ORDER_STATUS,
     HANDOFF_STATUS,
     throwBiz,
@@ -88,7 +73,7 @@ function createManualOrderWriteService(deps) {
     normalizeAddressPayload,
     normalizeStoredAddresses,
     isPhoneValid,
-    extractOrderAddressSnapshot,
+    buildAddressId,
   } = deps
 
   return {
@@ -125,7 +110,6 @@ function createManualOrderWriteService(deps) {
       const requestedManualAddress = hasManualAddressInput
         ? normalizeManualDeliveryAddressInput(event.address, normalizeAddressPayload, normalizePhone)
         : null
-      if (hasManualAddressInput && !requestedManualAddress) return fail('INVALID_ADDRESS', '手动地址格式不正确')
 
       const newManualCustomer = (event && event.newManualCustomer) || null
       const newManualNickname = sanitizeManualCustomerNickname(newManualCustomer && newManualCustomer.nickname)
@@ -169,6 +153,37 @@ function createManualOrderWriteService(deps) {
           }
           if (qtyByDishId.size === 0) throwBiz('BAD_REQUEST', 'Empty items')
 
+          async function createCustomerAddressTx(customerOpenId, inputAddress, options = {}) {
+            const customerId = String(customerOpenId || '').trim()
+            if (!customerId) throwBiz('BAD_REQUEST', 'Missing customerOpenId')
+            const addr = inputAddress || null
+            if (!addr) throwBiz('INVALID_ADDRESS', '配送订单缺少有效地址')
+            const phone = normalizePhone(addr.phone || '')
+            if (!isPhoneValid(phone)) throwBiz('INVALID_PHONE', '请填写有效电话')
+
+            const now = options.now || db.serverDate()
+            const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now()
+            const addrId = buildAddressId()
+            await tx.collection('customer_addresses').doc(addrId).set({
+              data: {
+                customerOpenId: customerId,
+                id: addrId,
+                label: String(addr.label || '').trim(),
+                line1: String(addr.line1 || '').trim(),
+                line2: String(addr.line2 || '').trim(),
+                postalCode: String(addr.postalCode || '').trim(),
+                city: String(addr.city || '').trim(),
+                phone,
+                country: 'FR',
+                createdAtMs: nowMs,
+                updatedAtMs: nowMs,
+                createdAt: now,
+                updatedAt: now,
+              },
+            })
+            return addrId
+          }
+
           async function createManualCustomerTx() {
             const now = db.serverDate()
             const nowMs = Date.now()
@@ -189,30 +204,11 @@ function createManualOrderWriteService(deps) {
             if (!customerId) throwBiz('TX_FAILED', '创建代录客户失败')
 
             const saveDefaultAddress =
-              requestedManualCustomerDefaultAddress ||
-              (fulfillmentType === 'delivery' && requestedAddressMode === 'manual' ? requestedManualAddress : null)
+              requestedManualCustomerDefaultAddress || (fulfillmentType === 'delivery' ? requestedManualAddress : null)
 
             let defaultAddressId = ''
             if (saveDefaultAddress) {
-              const addrId = buildManualAddressId()
-              defaultAddressId = addrId
-              await tx.collection('customer_addresses').doc(addrId).set({
-                data: {
-                  customerOpenId: customerId,
-                  id: addrId,
-                  label: String(saveDefaultAddress.label || '').trim(),
-                  line1: String(saveDefaultAddress.line1 || '').trim(),
-                  line2: String(saveDefaultAddress.line2 || '').trim(),
-                  postalCode: String(saveDefaultAddress.postalCode || '').trim(),
-                  city: String(saveDefaultAddress.city || '').trim(),
-                  phone: normalizePhone(saveDefaultAddress.phone || ''),
-                  country: 'FR',
-                  createdAtMs: nowMs,
-                  updatedAtMs: nowMs,
-                  createdAt: now,
-                  updatedAt: now,
-                },
-              })
+              defaultAddressId = await createCustomerAddressTx(customerId, saveDefaultAddress, { now, nowMs })
             }
 
             let profilePhone = requestedManualProfilePhone
@@ -235,10 +231,11 @@ function createManualOrderWriteService(deps) {
                 updatedAt: now,
               },
             })
-            return customerId
+            return { customerId, defaultAddressId }
           }
 
           let customerOpenId = ''
+          let createdManualCustomerDefaultAddressId = ''
           if (isSelectExisting) {
             customerOpenId = requestedCustomerOpenId
             if (!customerOpenId) throwBiz('BAD_REQUEST', 'Missing customerOpenId')
@@ -251,7 +248,9 @@ function createManualOrderWriteService(deps) {
             }
             if (!profileExists) throwBiz('NOT_FOUND', 'Customer not found')
           } else {
-            customerOpenId = await createManualCustomerTx()
+            const createdManual = await createManualCustomerTx()
+            customerOpenId = String((createdManual && createdManual.customerId) || '').trim()
+            createdManualCustomerDefaultAddressId = String((createdManual && createdManual.defaultAddressId) || '').trim()
           }
 
           let customerProfile = null
@@ -265,8 +264,10 @@ function createManualOrderWriteService(deps) {
 
           let customerAddressRows = []
           try {
-            const r = await tx.collection('customer_addresses').where({ customerOpenId }).get()
-            customerAddressRows = (r && r.data) || []
+            customerAddressRows = await getAllByPaging(
+              (skip, limit) => tx.collection('customer_addresses').where({ customerOpenId }).skip(skip).limit(limit),
+              { pageSize: 100 }
+            )
           } catch (err) {
             customerAddressRows = []
           }
@@ -296,7 +297,6 @@ function createManualOrderWriteService(deps) {
 
           let orderContactPhone = ''
           let orderAddressId = null
-          let orderAddress = null
           let deliveryTimeSlotLabelSnapshot = null
           let acceptDeliverySlot = false
 
@@ -308,15 +308,21 @@ function createManualOrderWriteService(deps) {
               orderContactPhone = normalizePhone(selectedAddress.phone || '')
               if (!isPhoneValid(orderContactPhone)) throwBiz('INVALID_PHONE', '配送地址缺少有效电话')
               orderAddressId = selectedAddress.id
-              orderAddress = buildOrderAddressSnapshotFromAny(selectedAddress)
             } else {
+              if (hasManualAddressInput && !requestedManualAddress) throwBiz('INVALID_ADDRESS', '手动地址格式不正确')
               if (!requestedManualAddress) throwBiz('INVALID_ADDRESS', '配送订单缺少有效地址')
               orderContactPhone = normalizePhone(requestedManualAddress.phone || '')
               if (!isPhoneValid(orderContactPhone)) throwBiz('INVALID_PHONE', '请填写有效电话')
-              orderAddressId = null
-              orderAddress = buildOrderAddressSnapshotFromAny(requestedManualAddress)
+              if (isCreateManual && createdManualCustomerDefaultAddressId) {
+                orderAddressId = createdManualCustomerDefaultAddressId
+              } else {
+                orderAddressId = await createCustomerAddressTx(customerOpenId, {
+                  ...requestedManualAddress,
+                  phone: orderContactPhone,
+                })
+              }
             }
-            if (!extractOrderAddressSnapshot(orderAddress)) throwBiz('INVALID_ADDRESS', '配送订单缺少有效地址')
+            if (!orderAddressId) throwBiz('INVALID_ADDRESS', '配送订单缺少有效地址')
             deliveryTimeSlotLabelSnapshot = String((sale && sale.deliveryTimeSlotLabel) || '').trim()
             if (!deliveryTimeSlotLabelSnapshot) throwBiz('BAD_REQUEST', '配送需要时间段')
             acceptDeliverySlot = true
@@ -325,7 +331,6 @@ function createManualOrderWriteService(deps) {
             orderContactPhone = requestedPickupPhone || profilePhone
             if (!isPhoneValid(orderContactPhone)) throwBiz('INVALID_PHONE', '请填写有效电话')
             orderAddressId = null
-            orderAddress = null
             deliveryTimeSlotLabelSnapshot = null
             acceptDeliverySlot = false
           }
@@ -429,7 +434,6 @@ function createManualOrderWriteService(deps) {
             acceptDeliverySlot,
             contact: { phone: orderContactPhone },
             addressId: fulfillmentType === 'delivery' ? orderAddressId : null,
-            address: fulfillmentType === 'delivery' ? orderAddress : null,
             minOrderCentsSnapshot: null,
             payment: {
               method: paymentMethod,
