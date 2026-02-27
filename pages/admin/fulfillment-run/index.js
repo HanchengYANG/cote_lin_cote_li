@@ -3,6 +3,7 @@ const { createRunPage } = require('../run-page-factory')
 createRunPage({
   listSalesAction: 'listFulfillmentSales',
   getRunAction: 'getSaleFulfillmentRun',
+  enableGoogleNav: true,
   emptySelectorLabel: '暂无可配送执行开单',
   preferredStatuses: ['CLOSED', 'FULFILLING'],
   appendedHintFormatter(count) {

@@ -57,7 +57,8 @@
 
         <view class="card" wx:else>
           <view class="title">订单列表</view>
-          <view class="order-row" wx:for="{{orders}}" wx:key="_id" data-id="{{item._id}}" bindtap="goOrderDetail" hover-class="order-row-hover">
+          <view class="muted small">点任一订单弹出操作菜单</view>
+          <view class="order-row" wx:for="{{orders}}" wx:key="_id" data-id="{{item._id}}" bindtap="onOpenOrderActions" hover-class="order-row-hover">
             <view class="order-main">
               <view class="order-top">
                 <text class="name">{{item.customerNameText}}</text>
@@ -75,26 +76,6 @@
                 <text class="status-pill {{item.isPaid ? 'ok' : ''}}">{{item.paidStatusText}}</text>
                 <text class="status-pill">{{item.paymentMethodText}}</text>
               </view>
-            </view>
-            <view class="ops" wx:if="{{canOperate}}">
-              <button
-                class="icon-btn {{item.isDelivered ? 'ok' : ''}}"
-                size="mini"
-                catchtap="onToggleHandoff"
-                data-id="{{item._id}}"
-                data-handoff="{{item.handoffStatus}}"
-                disabled="{{!!operatingOrderId}}">
-                🚚
-              </button>
-              <button
-                class="icon-btn {{item.isPaid ? 'ok' : ''}}"
-                size="mini"
-                catchtap="onTogglePaid"
-                data-id="{{item._id}}"
-                data-paid="{{item.payment.paidStatus}}"
-                disabled="{{!!operatingOrderId}}">
-                💰
-              </button>
             </view>
           </view>
         </view>
