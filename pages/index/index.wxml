@@ -47,6 +47,7 @@
         <view class="dish-center" bindtap="goDishDetail" data-id="{{item._id}}">
           <view class="dish-name">{{item.name}}</view>
           <view class="dish-desc" wx:if="{{item.descPlain}}">{{item.descPlain}}</view>
+          <view class="dish-spec">{{item.piecesPerOrderQtyText}}</view>
           <view class="price-row">
             <view class="dish-price">€{{item.priceEuro}}</view>
             <view class="badge {{item.statusClass}}">{{item.statusText}}</view>

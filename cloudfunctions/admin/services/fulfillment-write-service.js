@@ -26,26 +26,32 @@ function createFulfillmentWriteService(deps) {
 
   function toProductionPayload(items) {
     const nextItems = Array.isArray(items) ? items : []
-    let totalNeedQty = 0
-    let totalPreparedQty = 0
+    let totalNeedOrderQty = 0
+    let totalNeedPieceQty = 0
+    let totalPreparedPieceQty = 0
     let totalPreparedCapped = 0
     nextItems.forEach((it) => {
-      const needQty = Math.max(0, toSafeInt(it && it.needQty, 0))
-      const preparedQty = Math.max(0, toSafeInt(it && it.preparedQty, 0))
-      totalNeedQty += needQty
-      totalPreparedQty += preparedQty
-      totalPreparedCapped += Math.min(needQty, preparedQty)
+      const needOrderQty = Math.max(0, toSafeInt(it && it.needOrderQty, 0))
+      const needPieceQty = Math.max(0, toSafeInt(it && it.needPieceQty, 0))
+      const preparedPieceQty = Math.max(0, toSafeInt(it && it.preparedPieceQty, 0))
+      totalNeedOrderQty += needOrderQty
+      totalNeedPieceQty += needPieceQty
+      totalPreparedPieceQty += preparedPieceQty
+      totalPreparedCapped += Math.min(needPieceQty, preparedPieceQty)
     })
-    const completionPercent = totalNeedQty > 0 ? Math.max(0, Math.min(100, Math.round((totalPreparedCapped * 100) / totalNeedQty))) : 0
+    const completionPercent =
+      totalNeedPieceQty > 0 ? Math.max(0, Math.min(100, Math.round((totalPreparedCapped * 100) / totalNeedPieceQty))) : 0
     return {
-      totalNeedQty,
-      totalPreparedQty,
+      totalNeedOrderQty,
+      totalNeedPieceQty,
+      totalPreparedPieceQty,
       completionPercent,
       items: nextItems.map((it) => ({
         dishId: it.dishId,
         dishName: it.dishNameSnapshot,
-        needQty: it.needQty,
-        preparedQty: it.preparedQty,
+        needOrderQty: it.needOrderQty,
+        needPieceQty: it.needPieceQty,
+        preparedPieceQty: it.preparedPieceQty,
       })),
     }
   }
@@ -59,7 +65,7 @@ function createFulfillmentWriteService(deps) {
       const openId = ctx && ctx.openId
       const saleId = String(event.saleId || '').trim()
       const dishId = String(event.dishId || '').trim()
-      const preparedQty = Math.max(0, toSafeInt(event.preparedQty, 0))
+      const preparedPieceQty = Math.max(0, toSafeInt(event.preparedPieceQty != null ? event.preparedPieceQty : event.preparedQty, 0))
       if (!saleId) return fail('BAD_REQUEST', 'Missing saleId')
       if (!dishId) return fail('BAD_REQUEST', 'Missing dishId')
       let sale = null
@@ -75,12 +81,12 @@ function createFulfillmentWriteService(deps) {
         const board = await buildSaleProductionBoardBySale(sale)
         const idx = board.items.findIndex((it) => String(it.dishId || '').trim() === dishId)
         if (idx < 0) return fail('BAD_REQUEST', 'Dish not found in sale')
-        const nextItems = board.items.map((it, i) => (i === idx ? { ...it, preparedQty } : it))
+        const nextItems = board.items.map((it, i) => (i === idx ? { ...it, preparedPieceQty } : it))
         await saveSaleProductionProgressBoard(saleId, nextItems, openId)
         return ok({
           saleId,
           dishId,
-          preparedQty,
+          preparedPieceQty,
           production: toProductionPayload(nextItems),
         })
       } catch (err) {
@@ -123,7 +129,7 @@ function createFulfillmentWriteService(deps) {
             invalidDishIds.push(dishId)
             return
           }
-          preparedMap.set(dishId, Math.max(0, toSafeInt(it && it.preparedQty, 0)))
+          preparedMap.set(dishId, Math.max(0, toSafeInt(it && (it.preparedPieceQty != null ? it.preparedPieceQty : it.preparedQty), 0)))
         })
         if (invalidDishIds.length) {
           return fail('BAD_REQUEST', 'Contains invalid dishIds', { invalidDishIds })
@@ -131,7 +137,7 @@ function createFulfillmentWriteService(deps) {
         const nextItems = (Array.isArray(board && board.items) ? board.items : []).map((it) => {
           const dishId = String((it && it.dishId) || '').trim()
           if (!preparedMap.has(dishId)) return { ...it }
-          return { ...it, preparedQty: preparedMap.get(dishId) }
+          return { ...it, preparedPieceQty: preparedMap.get(dishId) }
         })
         await saveSaleProductionProgressBoard(saleId, nextItems, openId)
         return ok({
@@ -508,3 +514,5 @@ function createFulfillmentWriteService(deps) {
 module.exports = {
   createFulfillmentWriteService,
 }
+
+

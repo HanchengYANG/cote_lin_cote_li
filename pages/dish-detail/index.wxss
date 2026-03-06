@@ -43,6 +43,15 @@ page {
   font-weight: 700;
   color: rgba(0, 0, 0, 0.7);
 }
+.spec {
+  margin-top: 12rpx;
+  display: inline-block;
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: rgba(0, 0, 0, 0.06);
+  color: rgba(0, 0, 0, 0.66);
+  font-size: 24rpx;
+}
 .title {
   font-size: 32rpx;
   font-weight: 700;

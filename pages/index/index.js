@@ -152,6 +152,8 @@ function decorateHomeDish(d, saleInfo, prevQtyMap) {
     statusClass,
     statusRank,
     qty,
+    piecesPerOrderQty: Math.max(1, Number(d.piecesPerOrderQty) || 1),
+    piecesPerOrderQtyText: '规格：1份 = ' + Math.max(1, Number(d.piecesPerOrderQty) || 1) + '个',
   }
 }
 

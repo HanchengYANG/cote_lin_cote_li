@@ -106,14 +106,16 @@ function createDashboardService(deps) {
                 saleStatus,
                 closed: {
                   production: {
-                    totalNeedQty: production.totalNeedQty,
-                    totalPreparedQty: production.totalPreparedQty,
+                    totalNeedOrderQty: production.totalNeedOrderQty,
+                    totalNeedPieceQty: production.totalNeedPieceQty,
+                    totalPreparedPieceQty: production.totalPreparedPieceQty,
                     completionPercent: production.completionPercent,
                     items: production.items.map((it) => ({
                       dishId: it.dishId,
                       dishName: it.dishNameSnapshot,
-                      needQty: it.needQty,
-                      preparedQty: it.preparedQty,
+                      needOrderQty: it.needOrderQty,
+                      needPieceQty: it.needPieceQty,
+                      preparedPieceQty: it.preparedPieceQty,
                     })),
                   },
                 },
@@ -126,14 +128,16 @@ function createDashboardService(deps) {
               try {
                 const productionBoard = await buildSaleProductionBoardBySale(activeSale)
                 production = {
-                  totalNeedQty: productionBoard.totalNeedQty,
-                  totalPreparedQty: productionBoard.totalPreparedQty,
+                  totalNeedOrderQty: productionBoard.totalNeedOrderQty,
+                  totalNeedPieceQty: productionBoard.totalNeedPieceQty,
+                  totalPreparedPieceQty: productionBoard.totalPreparedPieceQty,
                   completionPercent: productionBoard.completionPercent,
                   items: (productionBoard.items || []).map((it) => ({
                     dishId: it.dishId,
                     dishName: it.dishNameSnapshot,
-                    needQty: it.needQty,
-                    preparedQty: it.preparedQty,
+                    needOrderQty: it.needOrderQty,
+                    needPieceQty: it.needPieceQty,
+                    preparedPieceQty: it.preparedPieceQty,
                   })),
                 }
               } catch (err) {
@@ -181,3 +185,6 @@ function createDashboardService(deps) {
 module.exports = {
   createDashboardService,
 }
+
+
+

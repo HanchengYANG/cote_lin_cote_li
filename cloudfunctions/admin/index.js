@@ -459,15 +459,29 @@ function buildFulfillingOpsSummaryFromRows(rows) {
   }
 }
 
+function normalizePiecesPerOrderQty(value) {
+  return Math.max(1, toSafeInt(value, 1))
+}
+
 function normalizeProductionProgressItems(input) {
   const arr = Array.isArray(input) ? input : []
   return arr
-    .map((it) => ({
-      dishId: String((it && it.dishId) || '').trim(),
-      dishNameSnapshot: String((it && it.dishNameSnapshot) || '').trim(),
-      needQty: Math.max(0, toSafeInt(it && it.needQty, 0)),
-      preparedQty: Math.max(0, toSafeInt(it && it.preparedQty, 0)),
-    }))
+    .map((it) => {
+      const dishId = String((it && it.dishId) || '').trim()
+      const dishNameSnapshot = String((it && it.dishNameSnapshot) || '').trim()
+      const needOrderQty = Math.max(0, toSafeInt(it && it.needOrderQty, 0))
+      const needPieceQty = Math.max(0, toSafeInt(it && (it.needPieceQty != null ? it.needPieceQty : it.needQty), 0))
+      const preparedPieceQty = Math.max(0, toSafeInt(it && (it.preparedPieceQty != null ? it.preparedPieceQty : it.preparedQty), 0))
+      return {
+        dishId,
+        dishNameSnapshot,
+        needOrderQty,
+        needPieceQty,
+        preparedPieceQty,
+        needQty: needPieceQty,
+        preparedQty: preparedPieceQty,
+      }
+    })
     .filter((it) => it.dishId)
 }
 
@@ -489,49 +503,93 @@ async function getSaleProductionProgress(saleId) {
 
 function computeProductionSummary(items) {
   const list = Array.isArray(items) ? items : []
-  let totalNeedQty = 0
-  let totalPreparedQty = 0
+  let totalNeedOrderQty = 0
+  let totalNeedPieceQty = 0
+  let totalPreparedPieceQty = 0
   let totalPreparedCapped = 0
   for (const it of list) {
-    const needQty = Math.max(0, toSafeInt(it && it.needQty, 0))
-    const preparedQty = Math.max(0, toSafeInt(it && it.preparedQty, 0))
-    totalNeedQty += needQty
-    totalPreparedQty += preparedQty
-    totalPreparedCapped += Math.min(needQty, preparedQty)
+    const needOrderQty = Math.max(0, toSafeInt(it && it.needOrderQty, 0))
+    const needPieceQty = Math.max(0, toSafeInt(it && it.needPieceQty, 0))
+    const preparedPieceQty = Math.max(0, toSafeInt(it && it.preparedPieceQty, 0))
+    totalNeedOrderQty += needOrderQty
+    totalNeedPieceQty += needPieceQty
+    totalPreparedPieceQty += preparedPieceQty
+    totalPreparedCapped += Math.min(needPieceQty, preparedPieceQty)
   }
-  const completionPercent = totalNeedQty > 0 ? Math.max(0, Math.min(100, Math.round((totalPreparedCapped * 100) / totalNeedQty))) : 0
+  const completionPercent =
+    totalNeedPieceQty > 0 ? Math.max(0, Math.min(100, Math.round((totalPreparedCapped * 100) / totalNeedPieceQty))) : 0
   return {
-    totalNeedQty,
-    totalPreparedQty,
+    totalNeedOrderQty,
+    totalNeedPieceQty,
+    totalPreparedPieceQty,
+    totalNeedQty: totalNeedPieceQty,
+    totalPreparedQty: totalPreparedPieceQty,
     completionPercent,
   }
 }
 
 async function buildSaleProductionBoardBySale(sale) {
   const saleId = String((sale && sale._id) || '').trim()
-  const dishConfigs = normalizeDishConfigs(sale && sale.dishConfigs)
-  const dishIds = dishConfigs.map((x) => String(x.dishId || '').trim()).filter(Boolean)
+  const existing = await getSaleProductionProgress(saleId)
+  const existingItems = normalizeProductionProgressItems(existing && existing.items)
+  const preparedMap = new Map(existingItems.map((it) => [String(it.dishId || '').trim(), Math.max(0, toSafeInt(it.preparedPieceQty, 0))]))
+  const existingNameMap = new Map(existingItems.map((it) => [String(it.dishId || '').trim(), String(it.dishNameSnapshot || '').trim()]))
+
+  const activeOrders = await getAllByPaging(
+    (skip, limit) => db.collection('orders').where({ saleId, status: ORDER_STATUS.ACTIVE }).skip(skip).limit(limit),
+    { pageSize: 100 }
+  )
+  const demandMap = new Map()
+  for (const order of Array.isArray(activeOrders) ? activeOrders : []) {
+    const rawItems = Array.isArray(order && order.items) ? order.items : []
+    for (const rawItem of rawItems) {
+      const dishId = String((rawItem && rawItem.dishId) || '').trim()
+      const qty = Math.max(0, toSafeInt(rawItem && rawItem.qty, 0))
+      if (!dishId || qty <= 0) continue
+      const piecesPerOrderQtySnapshot = normalizePiecesPerOrderQty(rawItem && rawItem.piecesPerOrderQtySnapshot)
+      const current = demandMap.get(dishId) || {
+        dishId,
+        dishNameSnapshot: String((rawItem && rawItem.dishName) || '').trim(),
+        needOrderQty: 0,
+        needPieceQty: 0,
+      }
+      current.needOrderQty += qty
+      current.needPieceQty += qty * piecesPerOrderQtySnapshot
+      if (!current.dishNameSnapshot) {
+        current.dishNameSnapshot = String((rawItem && rawItem.dishName) || '').trim()
+      }
+      demandMap.set(dishId, current)
+    }
+  }
+
+  const dishIds = Array.from(new Set([...demandMap.keys(), ...preparedMap.keys()].filter(Boolean)))
   const dishes = await getDishesByIds(dishIds)
   const dishNameMap = new Map((dishes || []).map((d) => [String(d._id || '').trim(), String(d.name || d._id || '').trim()]))
-  const existing = await getSaleProductionProgress(saleId)
-  const preparedMap = new Map(
-    normalizeProductionProgressItems(existing && existing.items).map((it) => [String(it.dishId || '').trim(), Math.max(0, toSafeInt(it.preparedQty, 0))])
-  )
-  const items = dishConfigs
-    .map((cfg) => {
-      const dishId = String(cfg.dishId || '').trim()
-      const needQty = Math.max(0, toSafeInt(cfg.soldQty, 0))
-      const preparedQty = Math.max(0, toSafeInt(preparedMap.get(dishId), 0))
+
+  const items = dishIds
+    .map((dishId) => {
+      const demand = demandMap.get(dishId) || { needOrderQty: 0, needPieceQty: 0, dishNameSnapshot: '' }
+      const preparedPieceQty = Math.max(0, toSafeInt(preparedMap.get(dishId), 0))
+      const needOrderQty = Math.max(0, toSafeInt(demand.needOrderQty, 0))
+      const needPieceQty = Math.max(0, toSafeInt(demand.needPieceQty, 0))
       return {
         dishId,
-        dishNameSnapshot: dishNameMap.get(dishId) || dishId || '未知菜品',
-        needQty,
-        preparedQty,
+        dishNameSnapshot:
+          dishNameMap.get(dishId) ||
+          String(demand.dishNameSnapshot || '').trim() ||
+          existingNameMap.get(dishId) ||
+          dishId ||
+          '未知菜品',
+        needOrderQty,
+        needPieceQty,
+        preparedPieceQty,
+        needQty: needPieceQty,
+        preparedQty: preparedPieceQty,
       }
     })
-    .filter((it) => it.needQty > 0 || it.preparedQty > 0)
+    .filter((it) => it.needPieceQty > 0 || it.preparedPieceQty > 0)
     .sort((a, b) => {
-      if (b.needQty !== a.needQty) return b.needQty - a.needQty
+      if (b.needPieceQty !== a.needPieceQty) return b.needPieceQty - a.needPieceQty
       return String(a.dishNameSnapshot || '').localeCompare(String(b.dishNameSnapshot || ''))
     })
   const summary = computeProductionSummary(items)
@@ -827,4 +885,6 @@ exports.main = async (event) => {
 
   return fail('UNKNOWN_ACTION', `Unknown action: ${action || ''}`)
 }
+
+
 

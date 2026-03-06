@@ -15,6 +15,11 @@
         <input class="input" placeholder="例如：12.50" type="digit" value="{{priceEuro}}" bindinput="onPrice" />
         <view class="muted small">系统内部按“欧分(cents)”存储</view>
       </view>
+      <view class="card">
+        <view class="title">每份对应个数</view>
+        <input class="input" placeholder="例如：25" type="number" value="{{piecesPerOrderQtyInput}}" bindinput="onPiecesPerOrderQty" />
+        <view class="muted small">仅影响生产统计。默认 1，表示 1份 = 1个。</view>
+      </view>
 
       <view class="card">
         <view class="title">图片（最多 10 张）</view>

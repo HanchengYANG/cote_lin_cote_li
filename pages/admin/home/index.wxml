@@ -71,7 +71,7 @@
               <view class="progress-head">
                 <view class="progress-percent">{{activeSaleOpsSummary.closed.production.completionPercent}}%</view>
                 <view class="muted small">
-                  已生产 {{activeSaleOpsSummary.closed.production.totalPreparedQty}} / {{activeSaleOpsSummary.closed.production.totalNeedQty}}
+                  已生产 {{activeSaleOpsSummary.closed.production.totalPreparedPieceQty}} / {{activeSaleOpsSummary.closed.production.totalNeedPieceQty}} 个
                 </view>
               </view>
               <view class="progress-track">
@@ -87,8 +87,8 @@
                 </view>
                 <view class="sale-stats-list" wx:if="{{!closedProductionItemsCollapsed}}">
                   <view class="sale-stat-row" wx:for="{{activeSaleOpsSummary.closed.production.items}}" wx:key="dishId">
-                    <view class="sale-stat-name">{{item.dishName}}</view>
-                    <view class="sale-stat-count">{{item.preparedQty}} / {{item.needQty}}</view>
+                    <view class="sale-stat-name">{{item.dishName}} · {{item.needOrderQty}}份</view>
+                    <view class="sale-stat-count">{{item.preparedPieceQty}} / {{item.needPieceQty}}个</view>
                   </view>
                 </view>
               </block>
@@ -122,13 +122,13 @@
                 </view>
               </view>
             </view>
-            <block wx:if="{{activeSaleOpsSummary && activeSaleOpsSummary.fulfilling && activeSaleOpsSummary.fulfilling.production && activeSaleOpsSummary.fulfilling.production.totalNeedQty>0 && activeSaleOpsSummary.fulfilling.production.completionPercent<100}}">
+            <block wx:if="{{activeSaleOpsSummary && activeSaleOpsSummary.fulfilling && activeSaleOpsSummary.fulfilling.production && activeSaleOpsSummary.fulfilling.production.totalNeedPieceQty>0 && activeSaleOpsSummary.fulfilling.production.completionPercent<100}}">
               <view class="section-subtitle">生产进度（仍在进行）</view>
               <view class="progress-panel">
                 <view class="progress-head">
                   <view class="progress-percent">{{activeSaleOpsSummary.fulfilling.production.completionPercent}}%</view>
                   <view class="muted small">
-                    已生产 {{activeSaleOpsSummary.fulfilling.production.totalPreparedQty}} / {{activeSaleOpsSummary.fulfilling.production.totalNeedQty}}
+                    已生产 {{activeSaleOpsSummary.fulfilling.production.totalPreparedPieceQty}} / {{activeSaleOpsSummary.fulfilling.production.totalNeedPieceQty}} 个
                   </view>
                 </view>
                 <view class="progress-track">
@@ -142,8 +142,8 @@
                 </view>
                 <view class="sale-stats-list" wx:if="{{activeSaleOpsSummary.fulfilling.production.items.length && !fulfillingProductionItemsCollapsed}}">
                   <view class="sale-stat-row" wx:for="{{activeSaleOpsSummary.fulfilling.production.items}}" wx:key="dishId">
-                    <view class="sale-stat-name">{{item.dishName}}</view>
-                    <view class="sale-stat-count">{{item.preparedQty}} / {{item.needQty}}</view>
+                    <view class="sale-stat-name">{{item.dishName}} · {{item.needOrderQty}}份</view>
+                    <view class="sale-stat-count">{{item.preparedPieceQty}} / {{item.needPieceQty}}个</view>
                   </view>
                 </view>
               </view>
@@ -267,3 +267,5 @@
     </block>
   </view>
 </scroll-view>
+
+

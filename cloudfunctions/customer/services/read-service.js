@@ -33,6 +33,7 @@ function createReadService(deps) {
       )
       const dishes = rows.map((d) => ({
         ...d,
+        piecesPerOrderQty: Math.max(1, Number(d.piecesPerOrderQty) || 1),
         images: normalizeImageIds(d.images),
         descPlain: String(d.descPlain || ''),
       }))
@@ -42,6 +43,7 @@ function createReadService(deps) {
         _id: d._id,
         name: d.name,
         priceCents: d.priceCents || 0,
+        piecesPerOrderQty: Math.max(1, Number(d.piecesPerOrderQty) || 1),
         descPlain: d.descPlain,
         images: d.images,
         thumbUrl: urlMap.get(d.images[0] || '') || '',
@@ -117,6 +119,7 @@ function createReadService(deps) {
           _id: d._id,
           name: d.name,
           priceCents: d.priceCents || 0,
+          piecesPerOrderQty: Math.max(1, Number(d.piecesPerOrderQty) || 1),
           descPlain: d.descPlain,
           images: d.images,
           thumbUrl: urlMap.get(d.images[0] || '') || '',
@@ -187,6 +190,7 @@ function createReadService(deps) {
           _id: dish._id,
           name: dish.name,
           priceCents: dish.priceCents || 0,
+          piecesPerOrderQty: Math.max(1, Number(dish.piecesPerOrderQty) || 1),
           images: imageIds,
           imageUrls,
           descMd,

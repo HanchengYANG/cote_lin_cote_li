@@ -42,6 +42,8 @@ createPage({
         ...d,
         priceEuro: centToEuro(d.priceCents || 0),
         imageUrls: normalizeImageUrls(d.imageUrls || []),
+        piecesPerOrderQty: Math.max(1, Number(d.piecesPerOrderQty) || 1),
+        piecesPerOrderQtyText: '规格：1份 = ' + Math.max(1, Number(d.piecesPerOrderQty) || 1) + '个',
       },
     })
   },

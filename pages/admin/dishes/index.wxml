@@ -20,6 +20,7 @@
             <view class="left-text">
               <view class="name">{{item.name}}</view>
               <view class="muted small">€{{item.priceEuro}}</view>
+              <view class="muted small">生产：{{item.productionSummary}}</view>
             </view>
           </view>
         </view>

@@ -32,6 +32,14 @@ function createCustomerOrderService(deps) {
     return order && Object.prototype.hasOwnProperty.call(order, 'address') ? { address: _.remove } : {}
   }
 
+  function getExistingPiecesPerOrderQtySnapshot(item) {
+    return Math.max(1, toSafeInt(item && item.piecesPerOrderQtySnapshot, 1))
+  }
+
+  function getDishPiecesPerOrderQtySnapshot(dish) {
+    return Math.max(1, toSafeInt(dish && dish.piecesPerOrderQty, 1))
+  }
+
   return {
     async updateMyOrderItems(event, ctx) {
       const openId = ctx && ctx.openId
@@ -127,7 +135,14 @@ function createCustomerOrderService(deps) {
             const lineTotalCents = unitPriceCents * nextQty
             totalQty += nextQty
             totalAmountCents += lineTotalCents
-            nextItems.push({ dishId, dishName, unitPriceCents, qty: nextQty, lineTotalCents })
+            nextItems.push({
+              dishId,
+              dishName,
+              unitPriceCents,
+              qty: nextQty,
+              lineTotalCents,
+              piecesPerOrderQtySnapshot: getExistingPiecesPerOrderQtySnapshot(old),
+            })
           }
           if (nextItems.length === 0) throwBiz('BAD_REQUEST', 'Order cannot be empty, cancel it instead')
 
@@ -411,7 +426,16 @@ function createCustomerOrderService(deps) {
             const lineTotalCents = unitPriceCents * qty
             totalQty += qty
             totalAmountCents += lineTotalCents
-            orderItems.push({ dishId, dishName, unitPriceCents, qty, lineTotalCents })
+            orderItems.push({
+              dishId,
+              dishName,
+              unitPriceCents,
+              qty,
+              lineTotalCents,
+              piecesPerOrderQtySnapshot: oldItem
+                ? getExistingPiecesPerOrderQtySnapshot(oldItem)
+                : getDishPiecesPerOrderQtySnapshot(dish),
+            })
           }
           if (orderItems.length === 0) throwBiz('BAD_REQUEST', 'Empty items')
 

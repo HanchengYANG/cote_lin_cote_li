@@ -54,6 +54,10 @@ function normalizeManualDeliveryAddressInput(input, normalizeAddressPayload, nor
   }
 }
 
+function getDishPiecesPerOrderQtySnapshot(dish, toSafeInt) {
+  return Math.max(1, toSafeInt(dish && dish.piecesPerOrderQty, 1))
+}
+
 function createManualOrderWriteService(deps) {
   const {
     db,
@@ -367,7 +371,14 @@ function createManualOrderWriteService(deps) {
             if (!dishName) throwBiz('ITEM_NOT_ALLOWED', 'Item not allowed', { dishId })
             const unitPriceCents = Math.max(0, toSafeInt(dish && dish.priceCents, 0))
             const lineTotalCents = unitPriceCents * qty
-            orderItems.push({ dishId, dishName, unitPriceCents, qty, lineTotalCents })
+            orderItems.push({
+              dishId,
+              dishName,
+              unitPriceCents,
+              qty,
+              lineTotalCents,
+              piecesPerOrderQtySnapshot: getDishPiecesPerOrderQtySnapshot(dish, toSafeInt),
+            })
             totalQty += qty
             totalAmountCents += lineTotalCents
           }

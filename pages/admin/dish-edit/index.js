@@ -32,12 +32,24 @@ function chooseImages(remain) {
   return chooseImage()
 }
 
+function pickPiecesPerOrderQtyApplyMode() {
+  return new Promise((resolve) => {
+    wx.showActionSheet({
+      itemList: ['仅改菜品（不动未结束订单）', '同步未结束订单（OPEN/CLOSED/FULFILLING）'],
+      success: (res) => resolve(Number(res && res.tapIndex) === 1),
+      fail: () => resolve(null),
+    })
+  })
+}
+
 createPage({
   data: {
     dishId: '',
     loadPhase: 'ready',
     name: '',
     priceEuro: '',
+    piecesPerOrderQtyInput: '1',
+    initialPiecesPerOrderQty: 1,
     isActive: true,
     images: [], // fileIDs
     imageUrls: [], // temp urls for preview
@@ -54,7 +66,12 @@ createPage({
       loadPhase: dishId && !this.__hasRestoredSnapshot ? 'loading' : 'ready',
     })
     if (!dishId) return
-    if (this.__hasRestoredSnapshot) return
+    if (this.__hasRestoredSnapshot) {
+      this.setData({
+        initialPiecesPerOrderQty: Math.max(1, Number(this.data.piecesPerOrderQtyInput) || 1),
+      })
+      return
+    }
     const res = await call('admin', 'getDish', { dishId })
     this.setData({ loadPhase: 'ready' })
     if (!res.ok) {
@@ -67,6 +84,8 @@ createPage({
     this.setData({
       name: d.name || '',
       priceEuro: centToEuro(d.priceCents || 0),
+      piecesPerOrderQtyInput: String(Math.max(1, Number(d.piecesPerOrderQty) || 1)),
+      initialPiecesPerOrderQty: Math.max(1, Number(d.piecesPerOrderQty) || 1),
       isActive: !!d.isActive,
       images: imageIds,
       imageUrls,
@@ -80,6 +99,10 @@ createPage({
 
   onPrice(e) {
     this.setData({ priceEuro: e.detail.value })
+  },
+
+  onPiecesPerOrderQty(e) {
+    this.setData({ piecesPerOrderQtyInput: e.detail.value })
   },
 
   onActive(e) {
@@ -101,7 +124,6 @@ createPage({
       return
     }
     const remain = 10 - (this.data.images || []).length
-    // Quick feedback so user knows the tap is handled.
     try {
       wx.vibrateShort({ type: 'light' })
     } catch (e) {
@@ -195,6 +217,7 @@ createPage({
   async save() {
     const name = String(this.data.name || '').trim()
     const priceCents = euroToCent(this.data.priceEuro)
+    const piecesPerOrderQty = Number(this.data.piecesPerOrderQtyInput)
     if (!name) {
       wx.showToast({ title: '请填写名称', icon: 'none' })
       return
@@ -203,11 +226,24 @@ createPage({
       wx.showToast({ title: '请填写价格', icon: 'none' })
       return
     }
+    if (!Number.isFinite(piecesPerOrderQty) || piecesPerOrderQty <= 0 || Math.floor(piecesPerOrderQty) !== piecesPerOrderQty) {
+      wx.showToast({ title: '每份个数必须是正整数', icon: 'none' })
+      return
+    }
+    const initialPiecesPerOrderQty = Math.max(1, Number(this.data.initialPiecesPerOrderQty) || 1)
+    let applyPiecesPerOrderQtyToActiveOrders = false
+    if (this.data.dishId && initialPiecesPerOrderQty !== piecesPerOrderQty) {
+      const picked = await pickPiecesPerOrderQtyApplyMode()
+      if (picked == null) return
+      applyPiecesPerOrderQtyToActiveOrders = !!picked
+    }
     this.setData({ saving: true })
     const res = await call('admin', 'upsertDish', {
       dishId: this.data.dishId || null,
       name,
       priceCents,
+      piecesPerOrderQty,
+      applyPiecesPerOrderQtyToActiveOrders,
       isActive: !!this.data.isActive,
       images: clampImages(this.data.images || []),
       descMd: String(this.data.descMd || ''),
@@ -218,12 +254,20 @@ createPage({
       return
     }
     const deleteError = res.data && res.data.deleteError
+    const activeOrderSync = (res.data && res.data.activeOrderSync) || null
     if (deleteError) {
       wx.showToast({ title: '已保存，旧图清理失败', icon: 'none' })
+    } else if (activeOrderSync && activeOrderSync.applied && activeOrderSync.failed) {
+      wx.showToast({ title: '已保存，同步部分失败', icon: 'none' })
+    } else if (activeOrderSync && activeOrderSync.applied) {
+      const updatedOrderCount = Math.max(0, Number(activeOrderSync.updatedOrderCount || 0))
+      wx.showToast({
+        title: updatedOrderCount > 0 ? `已保存，同步${updatedOrderCount}单` : '已保存，无需同步',
+        icon: updatedOrderCount > 0 ? 'none' : 'success',
+      })
     } else {
       wx.showToast({ title: '已保存', icon: 'success' })
     }
     wx.navigateBack()
   },
 })
-

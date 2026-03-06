@@ -69,14 +69,16 @@ function createFulfillmentReadService(deps) {
             deliveryTimeSlotLabel: String((sale && sale.deliveryTimeSlotLabel) || ''),
           },
           production: {
-            totalNeedQty: board.totalNeedQty,
-            totalPreparedQty: board.totalPreparedQty,
+            totalNeedOrderQty: board.totalNeedOrderQty,
+            totalNeedPieceQty: board.totalNeedPieceQty,
+            totalPreparedPieceQty: board.totalPreparedPieceQty,
             completionPercent: board.completionPercent,
             items: board.items.map((it) => ({
               dishId: it.dishId,
               dishName: it.dishNameSnapshot,
-              needQty: it.needQty,
-              preparedQty: it.preparedQty,
+              needOrderQty: it.needOrderQty,
+              needPieceQty: it.needPieceQty,
+              preparedPieceQty: it.preparedPieceQty,
             })),
           },
           canEdit: saleStatus === SALE_STATUS.CLOSED,
@@ -241,3 +243,6 @@ function createFulfillmentReadService(deps) {
 module.exports = {
   createFulfillmentReadService,
 }
+
+
+

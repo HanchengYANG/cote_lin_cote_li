@@ -48,35 +48,49 @@ function readDatasetNumber(e, key, fallback = 0) {
   return Number.isFinite(n) ? n : fallback
 }
 
+function clampNonNegativeInt(value, fallback = 0) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return Math.max(0, fallback)
+  return Math.max(0, Math.floor(n))
+}
+
 function decorateProductionItem(item) {
-  const needQty = Math.max(0, Number(item && item.needQty) || 0)
-  const preparedQty = Math.max(0, Number(item && item.preparedQty) || 0)
+  const needOrderQty = clampNonNegativeInt(item && item.needOrderQty, 0)
+  const needPieceQty = clampNonNegativeInt(item && item.needPieceQty, 0)
+  const preparedPieceQty = clampNonNegativeInt(item && item.preparedPieceQty, 0)
   return {
     ...item,
-    needQty,
-    preparedQty,
-    isDone: needQty > 0 && preparedQty >= needQty,
-    isOver: preparedQty > needQty,
+    dishName: String((item && (item.dishName || item.dishNameSnapshot)) || ''),
+    needOrderQty,
+    needPieceQty,
+    preparedPieceQty,
+    preparedPieceQtyInput: String(preparedPieceQty),
+    isDone: needPieceQty > 0 && preparedPieceQty >= needPieceQty,
+    isOver: preparedPieceQty > needPieceQty,
   }
 }
 
 function buildProductionBoard(raw) {
   const items = (Array.isArray(raw && raw.items) ? raw.items : []).map(decorateProductionItem)
-  let totalNeedQty = 0
-  let totalPreparedQty = 0
+  let totalNeedOrderQty = 0
+  let totalNeedPieceQty = 0
+  let totalPreparedPieceQty = 0
   let totalPreparedCapped = 0
   items.forEach((it) => {
-    const needQty = Math.max(0, Number(it.needQty || 0))
-    const preparedQty = Math.max(0, Number(it.preparedQty || 0))
-    totalNeedQty += needQty
-    totalPreparedQty += preparedQty
-    totalPreparedCapped += Math.min(needQty, preparedQty)
+    const needOrderQty = clampNonNegativeInt(it.needOrderQty, 0)
+    const needPieceQty = clampNonNegativeInt(it.needPieceQty, 0)
+    const preparedPieceQty = clampNonNegativeInt(it.preparedPieceQty, 0)
+    totalNeedOrderQty += needOrderQty
+    totalNeedPieceQty += needPieceQty
+    totalPreparedPieceQty += preparedPieceQty
+    totalPreparedCapped += Math.min(needPieceQty, preparedPieceQty)
   })
   const completionPercent =
-    totalNeedQty > 0 ? Math.max(0, Math.min(100, Math.round((totalPreparedCapped * 100) / totalNeedQty))) : 0
+    totalNeedPieceQty > 0 ? Math.max(0, Math.min(100, Math.round((totalPreparedCapped * 100) / totalNeedPieceQty))) : 0
   return {
-    totalNeedQty,
-    totalPreparedQty,
+    totalNeedOrderQty,
+    totalNeedPieceQty,
+    totalPreparedPieceQty,
     completionPercent,
     items,
   }
@@ -84,6 +98,13 @@ function buildProductionBoard(raw) {
 
 function emptyProductionBoard() {
   return buildProductionBoard({ items: [] })
+}
+
+function replaceDraftItem(items, dishId, updater) {
+  return (Array.isArray(items) ? items : []).map((it) => {
+    if (String(it.dishId || '') !== dishId) return { ...it }
+    return updater({ ...it })
+  })
 }
 
 createPage({
@@ -230,6 +251,23 @@ createPage({
     })
   },
 
+  onPreparedInput(e) {
+    if (!this.data.canEdit || this.data.loadingBoard || this.data.savingBoard || this.data.completingAll) return
+    const dishId = readDatasetString(e, 'id')
+    if (!dishId) return
+    const rawValue = String((e && e.detail && e.detail.value) || '').trim()
+    const preparedPieceQty = rawValue ? clampNonNegativeInt(rawValue, 0) : 0
+    const nextItems = replaceDraftItem(this.data.productionDraft.items, dishId, (it) => ({
+      ...it,
+      preparedPieceQty,
+      preparedPieceQtyInput: rawValue ? String(preparedPieceQty) : '',
+    }))
+    this.setData({
+      productionDraft: buildProductionBoard({ items: nextItems }),
+      productionDirty: true,
+    })
+  },
+
   async onAdjustPrepared(e) {
     if (!this.data.canEdit || this.data.loadingBoard || this.data.savingBoard || this.data.completingAll) return
     const dishId = readDatasetString(e, 'id')
@@ -237,9 +275,13 @@ createPage({
     if (!dishId || !delta) return
     const item = (this.data.productionDraft.items || []).find((it) => String(it.dishId || '') === dishId)
     if (!item) return
-    const nextItems = (this.data.productionDraft.items || []).map((it) => {
-      if (String(it.dishId || '') !== dishId) return { ...it }
-      return { ...it, preparedQty: Math.max(0, Number(it.preparedQty || 0) + delta) }
+    const nextItems = replaceDraftItem(this.data.productionDraft.items, dishId, (it) => {
+      const preparedPieceQty = clampNonNegativeInt(Number(it.preparedPieceQty || 0) + delta, 0)
+      return {
+        ...it,
+        preparedPieceQty,
+        preparedPieceQtyInput: String(preparedPieceQty),
+      }
     })
     const productionDraft = buildProductionBoard({ items: nextItems })
     this.setData({
@@ -252,7 +294,7 @@ createPage({
     return (Array.isArray(items) ? items : [])
       .map((it) => ({
         dishId: String((it && it.dishId) || '').trim(),
-        preparedQty: Math.max(0, Number((it && it.preparedQty) || 0)),
+        preparedPieceQty: clampNonNegativeInt(it && it.preparedPieceQty, 0),
       }))
       .filter((it) => it.dishId)
   },
@@ -300,7 +342,11 @@ createPage({
       })
     })
     if (!modalRes.confirm) return
-    const nextItems = items.map((it) => ({ ...it, preparedQty: Math.max(0, Number(it.needQty || 0)) }))
+    const nextItems = items.map((it) => ({
+      ...it,
+      preparedPieceQty: clampNonNegativeInt(it.needPieceQty, 0),
+      preparedPieceQtyInput: String(clampNonNegativeInt(it.needPieceQty, 0)),
+    }))
     this.setData({
       productionDraft: buildProductionBoard({ items: nextItems }),
       productionDirty: true,
@@ -317,3 +363,5 @@ createPage({
     }
   },
 })
+
+

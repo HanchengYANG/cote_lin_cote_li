@@ -26,6 +26,14 @@ function createOrderWriteService(deps) {
     return order && Object.prototype.hasOwnProperty.call(order, 'address') ? { address: _.remove } : {}
   }
 
+  function getExistingPiecesPerOrderQtySnapshot(item) {
+    return Math.max(1, toSafeInt(item && item.piecesPerOrderQtySnapshot, 1))
+  }
+
+  function getDishPiecesPerOrderQtySnapshot(dish) {
+    return Math.max(1, toSafeInt(dish && dish.piecesPerOrderQty, 1))
+  }
+
   async function createCustomerAddress(customerOpenId, addressInput, phoneInput) {
     const openId = String(customerOpenId || '').trim()
     if (!openId) throwBiz('BAD_REQUEST', '配送订单缺少客户信息')
@@ -513,7 +521,16 @@ function createOrderWriteService(deps) {
             const lineTotalCents = unitPriceCents * nextQty
             totalQty += nextQty
             totalAmountCents += lineTotalCents
-            nextItems.push({ dishId, dishName, unitPriceCents, qty: nextQty, lineTotalCents })
+            nextItems.push({
+              dishId,
+              dishName,
+              unitPriceCents,
+              qty: nextQty,
+              lineTotalCents,
+              piecesPerOrderQtySnapshot: old
+                ? getExistingPiecesPerOrderQtySnapshot(old)
+                : getDishPiecesPerOrderQtySnapshot(dishRow),
+            })
           }
           if (nextItems.length === 0) throwBiz('BAD_REQUEST', 'Order cannot be empty, cancel it instead')
 

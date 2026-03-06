@@ -240,6 +240,13 @@ page {
   -webkit-box-orient: vertical;
 }
 
+.dish-spec {
+  margin-top: 8rpx;
+  font-size: 21rpx;
+  line-height: 1.35;
+  color: #475467;
+}
+
 .price-row {
   margin-top: auto;
   padding-top: 12rpx;

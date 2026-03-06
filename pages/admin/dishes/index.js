@@ -32,6 +32,8 @@ createPage({
       ...d,
       priceEuro: centToEuro(d.priceCents || 0),
       thumb: d.thumbUrl || '',
+      piecesPerOrderQty: Math.max(1, Number(d.piecesPerOrderQty) || 1),
+      productionSummary: `${Math.max(1, Number(d.piecesPerOrderQty) || 1)}个/份`,
     }))
     this.setData({ dishes })
   },

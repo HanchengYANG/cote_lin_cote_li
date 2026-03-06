@@ -21,6 +21,7 @@
         </swiper>
         <view class="name">{{dish.name}}</view>
         <view class="price">€{{dish.priceEuro}}</view>
+        <view class="spec" wx:if="{{dish.piecesPerOrderQtyText}}">{{dish.piecesPerOrderQtyText}}</view>
       </view>
 
       <view class="card" wx:if="{{dish.descHtml}}">
