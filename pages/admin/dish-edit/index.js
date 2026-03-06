@@ -51,9 +51,10 @@ createPage({
     const dishId = (query && query.dishId) || ''
     this.setData({
       dishId,
-      loadPhase: dishId ? 'loading' : 'ready',
+      loadPhase: dishId && !this.__hasRestoredSnapshot ? 'loading' : 'ready',
     })
     if (!dishId) return
+    if (this.__hasRestoredSnapshot) return
     const res = await call('admin', 'getDish', { dishId })
     this.setData({ loadPhase: 'ready' })
     if (!res.ok) {
@@ -225,3 +226,4 @@ createPage({
     wx.navigateBack()
   },
 })
+

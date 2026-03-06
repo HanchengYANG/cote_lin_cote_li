@@ -1,15 +1,11 @@
-const { call } = require('./api')
-const { getSession } = require('./session')
-
-const SNAPSHOT_TTL_MS = 15 * 1000
-
 function getStore() {
   const app = typeof getApp === 'function' ? getApp() : null
   if (!app) {
     if (!getStore._fallback) {
       getStore._fallback = {
-        valid: false,
-        payload: null,
+        entries: {},
+        inflightRequests: {},
+        epoch: 0,
       }
     }
     return getStore._fallback
@@ -17,128 +13,63 @@ function getStore() {
   if (!app.globalData) app.globalData = {}
   if (!app.globalData.appSnapshot) {
     app.globalData.appSnapshot = {
-      valid: false,
-      payload: null,
+      entries: {},
+      inflightRequests: {},
+      epoch: 0,
     }
   }
   return app.globalData.appSnapshot
 }
 
-function normalizeSale(raw) {
-  if (!raw || typeof raw !== 'object') {
-    return {
-      saleId: '',
-      status: '',
-      deliveryTimeSlotLabel: '',
-      note: '',
-      _id: '',
-    }
-  }
-  return {
-    saleId: String(raw.saleId || raw._id || '').trim(),
-    status: String(raw.status || '').trim(),
-    deliveryTimeSlotLabel: String(raw.deliveryTimeSlotLabel || '').trim(),
-    note: String(raw.note || '').trim(),
-    _id: String(raw._id || raw.saleId || '').trim(),
+function normalizeSnapshotKey(input) {
+  return String(input || '').trim()
+}
+
+function clonePayload(payload) {
+  if (payload == null) return payload
+  try {
+    return JSON.parse(JSON.stringify(payload))
+  } catch (err) {
+    return payload
   }
 }
 
-function normalizeMyCurrentSaleOrder(raw) {
-  if (!raw || typeof raw !== 'object') return null
+function buildEntry(payload) {
   return {
-    hasActiveOrder: !!raw.hasActiveOrder,
-    fulfillmentType: String(raw.fulfillmentType || '').trim(),
-  }
-}
-
-function normalizePayload(raw) {
-  const sale = normalizeSale(raw && raw.sale)
-  const dishes = Array.isArray(raw && raw.dishes) ? raw.dishes : []
-  const profile = raw && raw.profile && typeof raw.profile === 'object' ? raw.profile : null
-  const admin = raw && raw.admin && typeof raw.admin === 'object' ? raw.admin : null
-  const myCurrentSaleOrder = normalizeMyCurrentSaleOrder(raw && raw.myCurrentSaleOrder)
-  const session =
-    raw && raw.session && typeof raw.session === 'object'
-      ? {
-          openId: String(raw.session.openId || '').trim(),
-          isAdmin: !!raw.session.isAdmin,
-        }
-      : null
-  return {
-    sale,
-    dishes,
-    profile,
-    admin,
-    myCurrentSaleOrder,
-    session,
+    payload: clonePayload(payload),
     updatedAt: Date.now(),
   }
 }
 
-function getSnapshot() {
-  const store = getStore()
-  if (!store.valid || !store.payload) return null
-  if (!isPayloadFresh(store.payload)) {
-    store.valid = false
-    store.payload = null
-    return null
-  }
-  return store.payload
-}
+async function loadLegacyBootstrap(options = {}) {
+  // Lazy require to avoid circular import issues with api -> app-snapshot.
+  // eslint-disable-next-line global-require
+  const { call } = require('./api')
+  // eslint-disable-next-line global-require
+  const { getSession } = require('./session')
 
-function isSnapshotValid() {
-  const store = getStore()
-  return !!(store.valid && store.payload && isPayloadFresh(store.payload))
-}
-
-function isPayloadFresh(payload) {
-  const updatedAt = Number(payload && payload.updatedAt)
-  if (!Number.isFinite(updatedAt) || updatedAt <= 0) return false
-  return Date.now() - updatedAt < SNAPSHOT_TTL_MS
-}
-
-function setSnapshot(input) {
-  const store = getStore()
-  store.payload = normalizePayload(input)
-  store.valid = true
-  return store.payload
-}
-
-function invalidateSnapshot() {
-  const store = getStore()
-  store.valid = false
-  store.payload = null
-}
-
-async function ensureFresh(options = {}) {
-  const force = !!options.force
   const includeAdmin = !!options.includeAdmin
-  const store = getStore()
-  if (!force && store.valid && store.payload && isPayloadFresh(store.payload)) return store.payload
-
   const [homeRes, sess] = await Promise.all([call('customer', 'bootstrapHome'), getSession()])
   if (!homeRes.ok || !homeRes.data) {
-    throw new Error((homeRes && homeRes.message) || '同步失败，请重试')
+    throw new Error((homeRes && homeRes.message) || '加载失败，请重试')
   }
   if (!sess || !sess.ready) {
-    throw new Error('同步失败，请重试')
+    throw new Error('加载失败，请重试')
   }
 
   let admin = null
-  if (includeAdmin) {
-    if (sess && sess.isAdmin) {
-      const dashRes = await call('admin', 'getDashboard')
-      if (!dashRes.ok) {
-        throw new Error(dashRes.message || '同步失败，请重试')
-      }
-      admin = {
-        activeSale: (dashRes.data && dashRes.data.activeSale) || null,
-        stats: (dashRes.data && dashRes.data.stats) || { orderCount: 0 },
-      }
+  if (includeAdmin && sess && sess.isAdmin) {
+    const dashRes = await call('admin', 'getDashboard')
+    if (!dashRes.ok) {
+      throw new Error(dashRes.message || '加载失败，请重试')
+    }
+    admin = {
+      activeSale: (dashRes.data && dashRes.data.activeSale) || null,
+      stats: (dashRes.data && dashRes.data.stats) || { orderCount: 0 },
     }
   }
 
-  return setSnapshot({
+  return {
     sale: homeRes.data.sale,
     dishes: homeRes.data.dishes,
     profile: homeRes.data.profile,
@@ -148,13 +79,103 @@ async function ensureFresh(options = {}) {
       isAdmin: !!sess.isAdmin,
     },
     admin,
-  })
+  }
+}
+
+function resolveSnapshotSpec(options = {}) {
+  const snapshotKey = normalizeSnapshotKey(options.snapshotKey)
+  const loadSnapshotData = options.loadSnapshotData
+  if (snapshotKey && typeof loadSnapshotData === 'function') {
+    return {
+      snapshotKey,
+      loadSnapshotData,
+    }
+  }
+  return {
+    snapshotKey: '__legacy_app_snapshot__',
+    loadSnapshotData: () => loadLegacyBootstrap(options),
+  }
+}
+
+function getSnapshot(snapshotKey) {
+  const key = normalizeSnapshotKey(snapshotKey) || '__legacy_app_snapshot__'
+  const store = getStore()
+  const entry = store.entries[key]
+  return entry ? clonePayload(entry.payload) : null
+}
+
+function hasSnapshot(snapshotKey) {
+  return !!getSnapshot(snapshotKey)
+}
+
+function isSnapshotValid(snapshotKey) {
+  return hasSnapshot(snapshotKey)
+}
+
+function setSnapshot(snapshotKey, payload) {
+  const key = normalizeSnapshotKey(snapshotKey)
+  if (!key) return null
+  const store = getStore()
+  store.entries[key] = buildEntry(payload)
+  return clonePayload(store.entries[key].payload)
+}
+
+async function ensureFresh(options = {}) {
+  const force = !!options.force
+  const spec = resolveSnapshotSpec(options)
+  const snapshotKey = spec.snapshotKey
+  const loadSnapshotData = spec.loadSnapshotData
+
+  const store = getStore()
+  if (!force && store.entries[snapshotKey]) {
+    return clonePayload(store.entries[snapshotKey].payload)
+  }
+  if (store.inflightRequests[snapshotKey]) {
+    return store.inflightRequests[snapshotKey]
+  }
+
+  const promise = (async () => {
+    // If the snapshot was invalidated while the request was running, re-run
+    // against the current epoch instead of writing back stale data.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const startEpoch = getStore().epoch
+      const payload = await loadSnapshotData()
+      const latestStore = getStore()
+      if (latestStore.epoch !== startEpoch) continue
+      return setSnapshot(snapshotKey, payload)
+    }
+  })()
+
+  store.inflightRequests[snapshotKey] = promise
+  try {
+    return await promise
+  } finally {
+    const latestStore = getStore()
+    if (latestStore.inflightRequests[snapshotKey] === promise) {
+      delete latestStore.inflightRequests[snapshotKey]
+    }
+  }
+}
+
+function refreshSnapshot(options = {}) {
+  return ensureFresh({ ...options, force: true })
+}
+
+function invalidateSnapshot() {
+  const store = getStore()
+  store.entries = {}
+  store.inflightRequests = {}
+  store.epoch = Number(store.epoch || 0) + 1
 }
 
 module.exports = {
   getSnapshot,
+  hasSnapshot,
   isSnapshotValid,
   setSnapshot,
-  invalidateSnapshot,
   ensureFresh,
+  refreshSnapshot,
+  invalidateSnapshot,
 }
+

@@ -1,6 +1,7 @@
 const { centToEuro } = require('../../utils/format')
 const { call } = require('../../utils/api')
-const { getSnapshot, ensureFresh, invalidateSnapshot } = require('../../utils/app-snapshot')
+const { getSession } = require('../../utils/session')
+const { invalidateSnapshot } = require('../../utils/app-snapshot')
 const { createPage } = require('../../utils/create-page')
 
 function calcTotals(dishes, qtyMap) {
@@ -248,10 +249,9 @@ createPage({
     this._hasLoadedOnce = true
     this.bootstrap()
   },
-
   onShow() {
-    if (!this._hasLoadedOnce) return
-    this.hydrateFromCache({ allowRedirect: true })
+    if (!this._hasLoadedOnce || this.__hasRestoredSnapshot) return
+    this.reload({ silent: true, allowRedirect: true })
   },
 
   async bootstrap() {
@@ -259,17 +259,8 @@ createPage({
       this.reportError('请先启用云开发')
       return
     }
-    const applied = this.hydrateFromCache({ allowRedirect: true })
-    if (!applied) {
-      await this.reload({ silent: true, allowRedirect: true })
-      return
-    }
-  },
-
-  hydrateFromCache(options = {}) {
-    const cached = getSnapshot()
-    if (!cached || !Array.isArray(cached.dishes) || !cached.sale) return false
-    return this.applySnapshot(cached, options)
+    if (this.__hasRestoredSnapshot) return
+    await this.reload({ silent: true, allowRedirect: true })
   },
 
   applySnapshot(snapshot, options = {}) {
@@ -371,19 +362,31 @@ createPage({
     const allowRedirect = options.allowRedirect !== false
     setHomeRefresherTriggered(this, silent, true)
     invalidateSnapshot()
-    let snapshot = null
-    try {
-      snapshot = await ensureFresh()
-    } catch (err) {
-      snapshot = null
-    }
+    const [homeRes, sess] = await Promise.all([call('customer', 'bootstrapHome'), getSession()])
     setHomeRefresherTriggered(this, silent, false)
-    if (!snapshot) {
+    if (!homeRes || !homeRes.ok || !homeRes.data) {
+      this.setData({ isHydrating: false })
+      this.reportError((homeRes && homeRes.message) || '加载菜单失败')
+      return
+    }
+    if (!sess || !sess.ready) {
       this.setData({ isHydrating: false })
       this.reportError('加载菜单失败')
       return
     }
-    this.applySnapshot(snapshot, { allowRedirect })
+    this.applySnapshot(
+      {
+        sale: homeRes.data.sale,
+        dishes: homeRes.data.dishes,
+        profile: homeRes.data.profile,
+        myCurrentSaleOrder: homeRes.data.myCurrentSaleOrder,
+        session: {
+          openId: String(sess.openId || '').trim(),
+          isAdmin: !!sess.isAdmin,
+        },
+      },
+      { allowRedirect }
+    )
   },
 
   onPullDownRefresh() {
@@ -456,3 +459,6 @@ createPage({
     wx.navigateTo({ url: `/pages/dish-detail/index?dishId=${encodeURIComponent(id)}` })
   },
 })
+
+
+

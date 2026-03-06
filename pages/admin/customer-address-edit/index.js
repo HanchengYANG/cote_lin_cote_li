@@ -62,9 +62,10 @@ createPage({
       customerOpenId,
       addressId,
       isEdit: !!addressId,
-      loadPhase: addressId ? 'loading' : 'ready',
+      loadPhase: addressId && !this.__hasRestoredSnapshot ? 'loading' : 'ready',
     })
     if (!addressId) return
+    if (this.__hasRestoredSnapshot) return
     const res = await call('admin', 'getCustomerAddressBook', { customerOpenId })
     this.setData({ loadPhase: 'ready' })
     if (!res.ok) {
@@ -240,3 +241,4 @@ createPage({
     wx.navigateBack()
   },
 })
+

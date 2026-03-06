@@ -2,7 +2,7 @@ const { call } = require('../../utils/api')
 const { centToEuro } = require('../../utils/format')
 const { outOfStockMessage } = require('../../utils/order-errors')
 const { normalizePhone, normalizePhoneInputDigits, isPhoneValid, formatPhoneDisplay, formatPhoneBlurValue } = require('../../utils/phone')
-const { getSnapshot, invalidateSnapshot } = require('../../utils/app-snapshot')
+const { invalidateSnapshot } = require('../../utils/app-snapshot')
 const { createPage } = require('../../utils/create-page')
 const { showResultError } = require('../../utils/error-feedback')
 
@@ -413,47 +413,33 @@ createPage({
       return
     }
     this.setData({ cartItems })
-    const hydrated = this.hydrateFromSnapshot()
-    if (!hydrated) {
-      this.setData({ saleStatus: 'closed', sale: null, dishesById: {} })
+    if (this.__hasRestoredSnapshot) {
+      this.saveCart()
+      recalcLinesAndApplyCheckoutView(this)
+      return
     }
-    await this.reload({ silent: true, skipSaleFetch: true })
+    await this.reload({ silent: true })
   },
 
   onShow() {
     const fromAddressBook = !!this._fromAddressBook
     this._fromAddressBook = false
-    this.hydrateFromSnapshot()
     const pickedAddressId = String(wx.getStorageSync('checkout_selected_address_id') || '').trim()
-    if (fromAddressBook) {
-      this.setData({ loadPhase: 'loading' })
-      this.reload({ silent: false, skipSaleFetch: true, preferredAddressId: pickedAddressId })
+    if (fromAddressBook && this.__hasRestoredSnapshot) {
+      if (pickedAddressId && hasAddressId(this.data.addresses, pickedAddressId)) {
+        this.setData({ selectedAddressId: pickedAddressId })
+        recalcLinesAndApplyCheckoutView(this)
+      }
+      if (pickedAddressId) wx.removeStorageSync('checkout_selected_address_id')
       return
     }
-    this.reload({ silent: true, skipSaleFetch: true, preferredAddressId: pickedAddressId })
-  },
-
-  hydrateFromSnapshot() {
-    const snapshot = getSnapshot()
-    if (!snapshot || !snapshot.sale) return false
-    const snapSale = snapshot.sale
-    const dishesById = buildDishesByIdMap(snapshot.dishes)
-    const saleStatusRaw = String((snapSale && snapSale.status) || '').trim()
-    const isOpen = saleStatusRaw === 'OPEN'
-    const sale = isOpen
-      ? {
-          _id: String(snapSale.saleId || snapSale._id || ''),
-          status: saleStatusRaw || 'OPEN',
-          deliveryTimeSlotLabel: String(snapSale.deliveryTimeSlotLabel || ''),
-        }
-      : null
-    this.setData({
-      saleStatus: isOpen ? 'open' : 'closed',
-      sale,
-      dishesById,
-    })
-    recalcLinesAndApplyCheckoutView(this)
-    return true
+    if (this.__hasRestoredSnapshot) return
+    if (fromAddressBook) {
+      this.setData({ loadPhase: 'loading' })
+      this.reload({ silent: false, preferredAddressId: pickedAddressId })
+      return
+    }
+    this.reload({ silent: true, preferredAddressId: pickedAddressId })
   },
 
   saveCart() {
@@ -700,3 +686,4 @@ createPage({
     wx.redirectTo({ url: `/pages/order-success/index?orderId=${encodeURIComponent(orderId)}` })
   },
 })
+

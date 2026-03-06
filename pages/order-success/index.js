@@ -14,6 +14,7 @@ createPage({
       tip: '配送订单将在店主填写的时间段内安排送达；自取订单请按店主安排到店自取。',
     })
     if (!orderId) return
+    if (this.__hasRestoredSnapshot) return
     const res = await call('customer', 'getMyOrderDetail', { orderId })
     if (!res.ok || !res.data || !res.data.order) return
     const order = res.data.order
@@ -32,3 +33,4 @@ createPage({
     wx.reLaunch({ url: '/pages/index/index' })
   },
 })
+

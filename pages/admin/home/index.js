@@ -1,6 +1,6 @@
 const { call } = require('../../../utils/api')
 const { getSession } = require('../../../utils/session')
-const { getSnapshot, invalidateSnapshot } = require('../../../utils/app-snapshot')
+const { invalidateSnapshot } = require('../../../utils/app-snapshot')
 const { createPage } = require('../../../utils/create-page')
 
 function saleStatusText(status) {
@@ -140,7 +140,6 @@ createPage({
 
   onLoad() {
     this._skipNextOnShowRefresh = true
-    this.hydrateFromSnapshot()
     this.reload({ silent: true })
   },
 
@@ -149,14 +148,7 @@ createPage({
       this._skipNextOnShowRefresh = false
       return
     }
-    this.hydrateFromSnapshot()
     this.reload({ silent: true })
-  },
-
-  hydrateFromSnapshot() {
-    const patch = buildHydrateSnapshotPatch(getSnapshot())
-    if (!patch) return
-    this.setData(patch)
   },
 
   async reload(options = {}) {
@@ -346,3 +338,4 @@ createPage({
     await this.reload({ silent: true })
   },
 })
+

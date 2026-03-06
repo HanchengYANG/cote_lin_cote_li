@@ -47,9 +47,10 @@ createPage({
     this.setData({
       addressId,
       isEdit: !!addressId,
-      loadPhase: addressId ? 'loading' : 'ready',
+      loadPhase: addressId && !this.__hasRestoredSnapshot ? 'loading' : 'ready',
     })
     if (!addressId) return
+    if (this.__hasRestoredSnapshot) return
     const res = await call('customer', 'getMyProfile')
     this.setData({ loadPhase: 'ready' })
     if (!res.ok || !res.data || !res.data.profile) {
@@ -219,3 +220,4 @@ createPage({
     wx.navigateBack()
   },
 })
+
