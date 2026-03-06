@@ -44,6 +44,8 @@ const HANDOFF_STATUS_OPTIONS = [
   { label: '已交付', value: 'DELIVERED' },
 ]
 
+const CUSTOMER_PAGE_SIZE = 40
+
 function blankManualAddress() {
   return {
     label: '',
@@ -178,6 +180,45 @@ function filterCustomers(rows, query) {
   })
 }
 
+function mergeCustomerResults(existingRows, nextRows) {
+  const prev = Array.isArray(existingRows) ? existingRows : []
+  const next = Array.isArray(nextRows) ? nextRows : []
+  const nextById = new Map(
+    next
+      .map((row) => [String((row && row.customerOpenId) || '').trim(), row])
+      .filter(([id]) => !!id)
+  )
+  const seen = new Set()
+  const merged = []
+  for (const row of prev) {
+    const id = String((row && row.customerOpenId) || '').trim()
+    if (!id || seen.has(id)) continue
+    merged.push(nextById.get(id) || row)
+    seen.add(id)
+  }
+  for (const row of next) {
+    const id = String((row && row.customerOpenId) || '').trim()
+    if (!id || seen.has(id)) continue
+    merged.push(row)
+    seen.add(id)
+  }
+  return merged
+}
+
+function buildCustomerSearchStatePatch(keyword) {
+  return {
+    filteredCustomers: [],
+    customerSearchLoading: false,
+    customerSearchLoadingMore: false,
+    customerSearchHasMore: false,
+    customerSearchNextOffset: 0,
+    customerSearchError: '',
+    customerSearchInitialized: false,
+    customerSearchKeyword: String(keyword || '').trim(),
+    customerListScrollTop: 0,
+  }
+}
+
 function normalizeAddressOptionRow(addr, defaultAddressId) {
   const id = String((addr && addr.id) || '').trim()
   const label = String((addr && addr.label) || '').trim()
@@ -246,6 +287,14 @@ createPage({
     customerQuery: '',
     recentCustomers: [],
     filteredCustomers: [],
+    customerSearchLoading: false,
+    customerSearchLoadingMore: false,
+    customerSearchHasMore: false,
+    customerSearchNextOffset: 0,
+    customerSearchError: '',
+    customerSearchInitialized: false,
+    customerSearchKeyword: '',
+    customerListScrollTop: 0,
     selectedCustomerOpenId: '',
     selectedCustomer: null,
     customerAddresses: [],
@@ -280,12 +329,16 @@ createPage({
     this._manualAddrSuggestTimer = null
     this._isPickingManualAddrSuggestion = false
     this._ignoreNextManualAddrLine1Input = null
+    this._customerSearchReqSeq = 0
+    this._customerSearchTimer = null
     this.reload()
   },
 
   onUnload() {
     if (this._manualAddrSuggestTimer) clearTimeout(this._manualAddrSuggestTimer)
+    if (this._customerSearchTimer) clearTimeout(this._customerSearchTimer)
     this._manualAddrSuggestTimer = null
+    this._customerSearchTimer = null
     this._isPickingManualAddrSuggestion = false
     this._ignoreNextManualAddrLine1Input = null
   },
@@ -300,6 +353,9 @@ createPage({
     const finishLoadPhase = () => {
       if (this.data.loadPhase !== 'ready') this.setData({ loadPhase: 'ready' })
     }
+    if (this._customerSearchTimer) clearTimeout(this._customerSearchTimer)
+    this._customerSearchTimer = null
+    this._customerSearchReqSeq = (Number(this._customerSearchReqSeq) || 0) + 1
     if (this.data.loadPhase !== 'ready') this.setData({ loadPhase: 'loading' })
     setRefresherTriggered(this, true)
     this.setData({ loading: true })
@@ -321,16 +377,22 @@ createPage({
       sale,
       saleOpen,
       recentCustomers,
-      filteredCustomers: filterCustomers(recentCustomers, this.data.customerQuery),
+      ...buildCustomerSearchStatePatch(this.data.customerQuery),
     })
     setDishSelectionState(this, saleDishes)
+    if (this.data.customerAction === 'select_existing') {
+      await this.loadCustomerResults({ keyword: this.data.customerQuery, reset: true })
+    }
   },
 
-  onCustomerActionPick(e) {
+  async onCustomerActionPick(e) {
     const idx = safePickerIndex(e && e.detail && e.detail.value, CUSTOMER_ACTION_OPTIONS)
     const picked = CUSTOMER_ACTION_OPTIONS[idx]
     const nextAction = picked.value
     this._ignoreNextManualAddrLine1Input = null
+    if (this._customerSearchTimer) clearTimeout(this._customerSearchTimer)
+    this._customerSearchTimer = null
+    this._customerSearchReqSeq = (Number(this._customerSearchReqSeq) || 0) + 1
     const patch = {
       customerActionIndex: idx,
       customerAction: nextAction,
@@ -345,19 +407,120 @@ createPage({
       patch.addressModeIndex = 1
       patch.manualAddressSuggestions = []
       patch.manualAddressLine1Focused = false
-    } else if (this.data.fulfillmentTypeDraft === 'delivery') {
-      patch.addressMode = this.data.customerAddresses.length > 0 ? this.data.addressMode : 'manual'
-      patch.addressModeIndex = patch.addressMode === 'manual' ? 1 : 0
+      patch.customerQuery = ''
+      Object.assign(patch, buildCustomerSearchStatePatch(''))
+    } else {
+      Object.assign(patch, buildCustomerSearchStatePatch(this.data.customerQuery))
+      if (this.data.fulfillmentTypeDraft === 'delivery') {
+        patch.addressMode = this.data.customerAddresses.length > 0 ? this.data.addressMode : 'manual'
+        patch.addressModeIndex = patch.addressMode === 'manual' ? 1 : 0
+      }
     }
     this.setData(patch)
+    if (nextAction === 'select_existing') {
+      await this.loadCustomerResults({ keyword: patch.customerQuery != null ? patch.customerQuery : this.data.customerQuery, reset: true })
+    }
   },
 
   onCustomerQueryInput(e) {
     const customerQuery = String((e && e.detail && e.detail.value) || '')
+    this.setData({ customerQuery })
+    if (this.data.customerAction !== 'select_existing') return
+    this.scheduleCustomerSearch(customerQuery)
+  },
+
+  scheduleCustomerSearch(rawQuery) {
+    const customerQuery = String(rawQuery || '')
+    const keyword = customerQuery.trim()
+    if (this._customerSearchTimer) clearTimeout(this._customerSearchTimer)
+    this._customerSearchTimer = null
+    this._customerSearchReqSeq = (Number(this._customerSearchReqSeq) || 0) + 1
+    if (!keyword) {
+      this.loadCustomerResults({ keyword: '', reset: true })
+      return
+    }
     this.setData({
-      customerQuery,
-      filteredCustomers: filterCustomers(this.data.recentCustomers, customerQuery),
+      filteredCustomers: [],
+      customerSearchLoading: true,
+      customerSearchLoadingMore: false,
+      customerSearchHasMore: false,
+      customerSearchNextOffset: 0,
+      customerSearchError: '',
+      customerSearchInitialized: true,
+      customerSearchKeyword: keyword,
+      customerListScrollTop: 0,
     })
+    this._customerSearchTimer = setTimeout(() => {
+      this.loadCustomerResults({ keyword, reset: true, preserveLoading: true })
+    }, 250)
+  },
+
+  async loadCustomerResults(options) {
+    if (this.data.customerAction !== 'select_existing') return
+    const opts = options || {}
+    const keyword = String(
+      Object.prototype.hasOwnProperty.call(opts, 'keyword') ? opts.keyword : this.data.customerQuery
+    ).trim()
+    const reset = !!opts.reset
+    const preserveLoading = !!opts.preserveLoading
+    const offset = reset ? 0 : Math.max(0, Number(this.data.customerSearchNextOffset || 0))
+    if (!reset) {
+      if (this.data.customerSearchLoading || this.data.customerSearchLoadingMore || !this.data.customerSearchHasMore) return
+    }
+    const reqSeq = (Number(this._customerSearchReqSeq) || 0) + 1
+    this._customerSearchReqSeq = reqSeq
+    this.setData(
+      reset
+        ? {
+            filteredCustomers: preserveLoading ? this.data.filteredCustomers : [],
+            customerSearchLoading: true,
+            customerSearchLoadingMore: false,
+            customerSearchHasMore: false,
+            customerSearchNextOffset: 0,
+            customerSearchError: '',
+            customerSearchInitialized: true,
+            customerSearchKeyword: keyword,
+            customerListScrollTop: 0,
+          }
+        : {
+            customerSearchLoadingMore: true,
+            customerSearchError: '',
+            customerSearchKeyword: keyword,
+          }
+    )
+    const res = await call('admin', 'searchCustomersForManualOrder', {
+      keyword,
+      limit: CUSTOMER_PAGE_SIZE,
+      offset,
+    })
+    if (reqSeq !== this._customerSearchReqSeq) return
+    if (!res.ok) {
+      this.setData({
+        customerSearchLoading: false,
+        customerSearchLoadingMore: false,
+        customerSearchHasMore: false,
+        customerSearchError: res.message || '客户列表加载失败',
+        ...(reset ? { filteredCustomers: [], customerSearchNextOffset: 0 } : {}),
+      })
+      return
+    }
+    const rows = (Array.isArray(res.data && res.data.customers) ? res.data.customers : []).map(decorateCustomerSummary)
+    const nextRows = reset ? rows : mergeCustomerResults(this.data.filteredCustomers, rows)
+    this.setData({
+      filteredCustomers: nextRows,
+      customerSearchLoading: false,
+      customerSearchLoadingMore: false,
+      customerSearchHasMore: !!(res.data && res.data.hasMore),
+      customerSearchNextOffset: Number((res.data && res.data.nextOffset) || (offset + rows.length) || 0),
+      customerSearchError: '',
+      customerSearchInitialized: true,
+      customerSearchKeyword: keyword,
+    })
+  },
+
+  onCustomerResultScrollToLower() {
+    if (this.data.customerAction !== 'select_existing') return
+    this.loadCustomerResults({ keyword: this.data.customerSearchKeyword || this.data.customerQuery, reset: false })
   },
 
   async pickCustomer(e) {
@@ -370,7 +533,9 @@ createPage({
       return String(this.data.selectedCustomerOpenId || '').trim() !== customerOpenId
     }
     const pickedRow =
-      this.data.recentCustomers.find((x) => String((x && x.customerOpenId) || '').trim() === customerOpenId) || null
+      this.data.filteredCustomers.find((x) => String((x && x.customerOpenId) || '').trim() === customerOpenId) ||
+      this.data.recentCustomers.find((x) => String((x && x.customerOpenId) || '').trim() === customerOpenId) ||
+      null
     this.setData({ selectedCustomerOpenId: customerOpenId })
     const res = await call('admin', 'getCustomerDetail', { customerOpenId })
     if (isStalePick()) return
@@ -807,3 +972,4 @@ createPage({
     }, 180)
   },
 })
+

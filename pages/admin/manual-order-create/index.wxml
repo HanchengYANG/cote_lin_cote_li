@@ -30,24 +30,41 @@
       </picker>
 
       <block wx:if="{{customerAction==='select_existing'}}">
-        <input class="input" placeholder="搜索昵称 / 电话 / ID（本地筛选近期客户）" value="{{customerQuery}}" bindinput="onCustomerQueryInput" />
-        <view class="list muted small" wx:if="{{filteredCustomers.length===0}}">没有匹配客户</view>
-        <view class="customer-list" wx:else>
-          <view
-            class="customer-item {{item.customerOpenId===selectedCustomerOpenId ? 'selected' : ''}}"
-            wx:for="{{filteredCustomers}}"
-            wx:key="customerOpenId"
-            data-id="{{item.customerOpenId}}"
-            bindtap="pickCustomer"
-          >
-            <view class="row top">
-              <view class="strong">{{item.nicknameText}}</view>
-              <view class="badge" wx:if="{{item.sourceBadgeText}}">{{item.sourceBadgeText}}</view>
+        <input class="input" placeholder="搜索昵称 / 电话 / ID" value="{{customerQuery}}" bindinput="onCustomerQueryInput" />
+        <view class="muted small customer-search-hint">空搜索显示全部客户；支持按昵称 / 电话 / ID 搜索。</view>
+        <view class="warn-text small list" wx:if="{{customerSearchError}}">{{customerSearchError}}</view>
+        <scroll-view
+          class="customer-list"
+          wx:if="{{customerSearchLoading || customerSearchInitialized || filteredCustomers.length>0 || customerSearchError}}"
+          scroll-y
+          lower-threshold="80"
+          scroll-top="{{customerListScrollTop}}"
+          bindscrolltolower="onCustomerResultScrollToLower"
+        >
+          <view class="customer-empty muted small" wx:if="{{customerSearchError && filteredCustomers.length===0}}">客户列表加载失败，请修改关键词或稍后重试。</view>
+          <view class="customer-empty muted small" wx:elif="{{customerSearchLoading && filteredCustomers.length===0}}">客户列表加载中...</view>
+          <view class="customer-empty muted small" wx:elif="{{!customerSearchLoading && filteredCustomers.length===0 && !customerSearchError}}">{{customerQuery ? '没有匹配客户' : '暂无客户'}}</view>
+          <block wx:else>
+            <view
+              class="customer-item {{item.customerOpenId===selectedCustomerOpenId ? 'selected' : ''}}"
+              wx:for="{{filteredCustomers}}"
+              wx:key="customerOpenId"
+              data-id="{{item.customerOpenId}}"
+              bindtap="pickCustomer"
+            >
+              <view class="row top">
+                <view class="strong">{{item.nicknameText}}</view>
+                <view class="badge" wx:if="{{item.sourceBadgeText}}">{{item.sourceBadgeText}}</view>
+              </view>
+              <view class="muted small">电话：{{item.defaultPhoneText || '-'}}</view>
+              <view class="muted small">地址数：{{item.addressCount}}</view>
             </view>
-            <view class="muted small">电话：{{item.defaultPhoneText || '-'}}</view>
-            <view class="muted small">地址数：{{item.addressCount}}</view>
-          </view>
-        </view>
+            <view class="customer-list-footer muted small" wx:if="{{customerSearchLoadingMore}}">加载更多客户...</view>
+            <view class="customer-list-footer muted small" wx:elif="{{!customerSearchHasMore && filteredCustomers.length>0 && !customerSearchLoading}}">
+              {{customerQuery ? '搜索结果已全部显示' : '全部客户已加载完成'}}
+            </view>
+          </block>
+        </scroll-view>
 
         <view class="sub-card" wx:if="{{selectedCustomer}}">
           <view class="row">

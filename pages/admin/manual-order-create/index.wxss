@@ -147,9 +147,21 @@ page {
   margin-top: 10rpx;
 }
 
+.customer-search-hint {
+  margin-top: 10rpx;
+}
+
 .customer-list {
   margin-top: 10rpx;
+  height: 520rpx;
   max-height: 520rpx;
+  box-sizing: border-box;
+}
+
+.customer-empty,
+.customer-list-footer {
+  padding: 16rpx 6rpx;
+  text-align: center;
 }
 
 .customer-item {

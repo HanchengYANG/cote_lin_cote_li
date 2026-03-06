@@ -189,8 +189,11 @@ async function getCustomerAddressesByOpenIds(openIds) {
   for (let i = 0; i < ids.length; i += chunkSize) {
     const chunk = ids.slice(i, i + chunkSize)
     try {
-      const r = await db.collection('customer_addresses').where({ customerOpenId: _.in(chunk) }).get()
-      out.push(...(r.data || []))
+      const rows = await getAllByPaging(
+        (skip, limit) => db.collection('customer_addresses').where({ customerOpenId: _.in(chunk) }).skip(skip).limit(limit),
+        { pageSize: 100 }
+      )
+      out.push(...rows)
     } catch (err) {
       // ignore missing collection or query issue for admin display fallback
     }
@@ -824,3 +827,4 @@ exports.main = async (event) => {
 
   return fail('UNKNOWN_ACTION', `Unknown action: ${action || ''}`)
 }
+
