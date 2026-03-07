@@ -58,13 +58,17 @@ function decorateProductionItem(item) {
   const needOrderQty = clampNonNegativeInt(item && item.needOrderQty, 0)
   const needPieceQty = clampNonNegativeInt(item && item.needPieceQty, 0)
   const preparedPieceQty = clampNonNegativeInt(item && item.preparedPieceQty, 0)
+  const preparedPieceQtyInput =
+    item && Object.prototype.hasOwnProperty.call(item, 'preparedPieceQtyInput')
+      ? String(item.preparedPieceQtyInput)
+      : String(preparedPieceQty)
   return {
     ...item,
     dishName: String((item && (item.dishName || item.dishNameSnapshot)) || ''),
     needOrderQty,
     needPieceQty,
     preparedPieceQty,
-    preparedPieceQtyInput: String(preparedPieceQty),
+    preparedPieceQtyInput,
     isDone: needPieceQty > 0 && preparedPieceQty >= needPieceQty,
     isOver: preparedPieceQty > needPieceQty,
   }
